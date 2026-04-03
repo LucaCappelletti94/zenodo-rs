@@ -1,0 +1,73 @@
+name: Stability Daily
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stability-daily
+  cancel-in-progress: false
+
+jobs:
+  feature-matrix:
+    name: Feature Matrix (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: default
+            command: cargo test --locked
+          - name: all-features
+            command: cargo test --all-features --locked
+          - name: native-tls-checksums
+            command: cargo test --no-default-features --features native-tls,checksums --locked
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: ${{ matrix.command }}
+
+  sandbox-light:
+    name: Sandbox Light Smoke
+    runs-on: ubuntu-latest
+    needs: feature-matrix
+    timeout-minutes: 30
+    environment: zenodo-sandbox
+    env:
+      RUST_BACKTRACE: "1"
+      ZENODO_SANDBOX_TOKEN: ${{ secrets.ZENODO_SANDBOX_TOKEN }}
+      ZENODO_SANDBOX_DRAFT_DEPOSITION_ID: ${{ vars.ZENODO_SANDBOX_DRAFT_DEPOSITION_ID }}
+      ZENODO_SANDBOX_RECORD_DOI: ${{ vars.ZENODO_SANDBOX_RECORD_DOI }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Validate sandbox configuration
+        shell: bash
+        run: |
+          test -n "$ZENODO_SANDBOX_TOKEN" || { echo "Missing ZENODO_SANDBOX_TOKEN secret"; exit 1; }
+          test -n "$ZENODO_SANDBOX_DRAFT_DEPOSITION_ID" || { echo "Missing ZENODO_SANDBOX_DRAFT_DEPOSITION_ID variable"; exit 1; }
+          test -n "$ZENODO_SANDBOX_RECORD_DOI" || { echo "Missing ZENODO_SANDBOX_RECORD_DOI variable"; exit 1; }
+
+      - name: Run light sandbox smoke suite
+        run: cargo test --test sandbox_light --all-features --locked -- --ignored --nocapture --test-threads=1
