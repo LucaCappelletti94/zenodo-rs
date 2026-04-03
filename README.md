@@ -6,9 +6,9 @@
 [![docs.rs](https://img.shields.io/docsrs/zenodo-rs)](https://docs.rs/zenodo-rs)
 [![License](https://img.shields.io/crates/l/zenodo-rs.svg)](https://github.com/LucaCappelletti94/zenodo-rs/blob/main/LICENSE)
 
-Async Rust client for core Zenodo workflows.
+Async Rust client for core [Zenodo](https://zenodo.org/) workflows.
 
-It covers deposition create/update/publish flows, safe draft reuse versus `newversion`, published-record lookup, latest-version resolution, and downloads behind a small typed API for automation and CI jobs.
+It covers deposition create/update/publish flows, safe draft reuse versus `newversion`, published-record lookup, latest-version resolution, and downloads behind a small typed API for automation and CI jobs built on top of the [Zenodo REST API](https://developers.zenodo.org/).
 
 ## Install
 
@@ -37,4 +37,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Notes
 
-`ZENODO_TOKEN` is the standard production token env var, and `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent. Write flows usually need `deposit:write` and `deposit:actions`. Public download APIs use Zenodo IDs and selectors rather than raw URLs, and uploads require a known content length.
+`ZENODO_TOKEN` is the standard env var for the production service at [zenodo.org](https://zenodo.org/), and `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent for [sandbox.zenodo.org](https://sandbox.zenodo.org/). Write flows usually need `deposit:write` and `deposit:actions`; see the [Zenodo developer docs](https://developers.zenodo.org/). Public download APIs use Zenodo IDs and selectors rather than raw URLs, and uploads require a known content length.
