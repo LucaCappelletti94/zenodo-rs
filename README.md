@@ -1,5 +1,11 @@
 # zenodo-rs
 
+[![CI](https://github.com/LucaCappelletti94/zenodo-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/LucaCappelletti94/zenodo-rs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/LucaCappelletti94/zenodo-rs/graph/badge.svg)](https://codecov.io/gh/LucaCappelletti94/zenodo-rs)
+[![crates.io](https://img.shields.io/crates/v/zenodo-rs.svg)](https://crates.io/crates/zenodo-rs)
+[![docs.rs](https://img.shields.io/docsrs/zenodo-rs)](https://docs.rs/zenodo-rs)
+[![License](https://img.shields.io/crates/l/zenodo-rs.svg)](https://github.com/LucaCappelletti94/zenodo-rs/blob/main/LICENSE)
+
 Async Rust client for core Zenodo workflows.
 
 It covers:
