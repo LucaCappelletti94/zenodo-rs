@@ -2,6 +2,7 @@
 
 use std::io::{ErrorKind, Read};
 use std::path::Path;
+use std::time::Duration;
 
 use bytes::Bytes;
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
@@ -116,6 +117,8 @@ pub struct ZenodoClientBuilder {
     endpoint: Endpoint,
     poll: PollOptions,
     user_agent: Option<String>,
+    request_timeout: Option<Duration>,
+    connect_timeout: Option<Duration>,
 }
 
 impl ZenodoClientBuilder {
@@ -178,6 +181,48 @@ impl ZenodoClientBuilder {
         self
     }
 
+    /// Sets the overall HTTP request timeout used by the underlying client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use zenodo_rs::{Auth, ZenodoClient};
+    ///
+    /// let client = ZenodoClient::builder(Auth::new("token"))
+    ///     .request_timeout(Duration::from_secs(30))
+    ///     .build()?;
+    ///
+    /// assert_eq!(client.request_timeout(), Some(Duration::from_secs(30)));
+    /// # Ok::<(), zenodo_rs::ZenodoError>(())
+    /// ```
+    #[must_use]
+    pub fn request_timeout(mut self, timeout: Duration) -> Self {
+        self.request_timeout = Some(timeout);
+        self
+    }
+
+    /// Sets the TCP connect timeout used by the underlying client.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use zenodo_rs::{Auth, ZenodoClient};
+    ///
+    /// let client = ZenodoClient::builder(Auth::new("token"))
+    ///     .connect_timeout(Duration::from_secs(5))
+    ///     .build()?;
+    ///
+    /// assert_eq!(client.connect_timeout(), Some(Duration::from_secs(5)));
+    /// # Ok::<(), zenodo_rs::ZenodoError>(())
+    /// ```
+    #[must_use]
+    pub fn connect_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_timeout = Some(timeout);
+        self
+    }
+
     /// Overrides the polling policy used by workflow helpers.
     ///
     /// # Examples
@@ -213,13 +258,22 @@ impl ZenodoClientBuilder {
             .user_agent
             .unwrap_or_else(|| format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
 
-        let inner = reqwest::Client::builder().user_agent(&user_agent).build()?;
+        let mut inner = reqwest::Client::builder().user_agent(&user_agent);
+        if let Some(timeout) = self.request_timeout {
+            inner = inner.timeout(timeout);
+        }
+        if let Some(timeout) = self.connect_timeout {
+            inner = inner.connect_timeout(timeout);
+        }
+        let inner = inner.build()?;
 
         Ok(ZenodoClient {
             inner,
             auth: self.auth,
             endpoint: self.endpoint,
             poll: self.poll,
+            request_timeout: self.request_timeout,
+            connect_timeout: self.connect_timeout,
         })
     }
 }
@@ -231,6 +285,8 @@ pub struct ZenodoClient {
     pub(crate) auth: Auth,
     pub(crate) endpoint: Endpoint,
     pub(crate) poll: PollOptions,
+    pub(crate) request_timeout: Option<Duration>,
+    pub(crate) connect_timeout: Option<Duration>,
 }
 
 impl ZenodoClient {
@@ -255,6 +311,8 @@ impl ZenodoClient {
             endpoint: Endpoint::default(),
             poll: PollOptions::default(),
             user_agent: None,
+            request_timeout: None,
+            connect_timeout: None,
         }
     }
 
@@ -316,6 +374,18 @@ impl ZenodoClient {
     #[must_use]
     pub fn poll_options(&self) -> &PollOptions {
         &self.poll
+    }
+
+    /// Returns the configured overall HTTP request timeout.
+    #[must_use]
+    pub fn request_timeout(&self) -> Option<Duration> {
+        self.request_timeout
+    }
+
+    /// Returns the configured TCP connect timeout.
+    #[must_use]
+    pub fn connect_timeout(&self) -> Option<Duration> {
+        self.connect_timeout
     }
 
     pub(crate) fn request(
@@ -651,15 +721,22 @@ where
 mod tests {
     use std::env::VarError;
     use std::io::{self, Cursor, Read};
+    use std::sync::Arc;
     use std::sync::Mutex;
     use std::time::Duration;
 
     use super::{bucket_upload_url, Auth, ZenodoClient};
     use crate::ids::BucketUrl;
-    use crate::{Endpoint, PollOptions, ZenodoError};
+    use crate::{Endpoint, PollOptions, RecordId, ZenodoError};
+    use axum::extract::State;
+    use axum::http::StatusCode;
+    use axum::routing::get;
+    use axum::{Json, Router};
     use http_body_util::BodyExt;
     use reqwest::Method;
     use secrecy::{ExposeSecret, SecretString};
+    use serde_json::json;
+    use tokio::net::TcpListener;
     use url::Url;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -714,12 +791,16 @@ mod tests {
         let client = ZenodoClient::builder(Auth::new("token"))
             .endpoint(endpoint.clone())
             .user_agent("custom-agent/1.0")
+            .request_timeout(Duration::from_secs(7))
+            .connect_timeout(Duration::from_secs(2))
             .poll_options(poll.clone())
             .build()
             .unwrap();
 
         assert_eq!(client.endpoint(), &endpoint);
         assert_eq!(client.poll_options(), &poll);
+        assert_eq!(client.request_timeout(), Some(Duration::from_secs(7)));
+        assert_eq!(client.connect_timeout(), Some(Duration::from_secs(2)));
         assert!(matches!(
             ZenodoClient::builder(Auth::new("token"))
                 .sandbox()
@@ -839,5 +920,57 @@ mod tests {
         let body = super::sized_body_from_reader(Cursor::new(b"abc".to_vec()), 3);
         drop(body);
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[tokio::test]
+    async fn request_timeout_is_enforced_for_http_calls() {
+        #[derive(Clone)]
+        struct DelayState {
+            delay: Duration,
+        }
+
+        async fn delayed_record(
+            State(state): State<Arc<DelayState>>,
+        ) -> (StatusCode, Json<serde_json::Value>) {
+            tokio::time::sleep(state.delay).await;
+            (
+                StatusCode::OK,
+                Json(json!({
+                    "id": 1,
+                    "recid": 1,
+                    "metadata": { "title": "slow" },
+                    "files": [],
+                    "links": {}
+                })),
+            )
+        }
+
+        let state = Arc::new(DelayState {
+            delay: Duration::from_millis(50),
+        });
+        let app = Router::new()
+            .route("/api/records/1", get(delayed_record))
+            .with_state(state);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = ZenodoClient::builder(Auth::new("token"))
+            .endpoint(Endpoint::Custom(
+                Url::parse(&format!("http://{addr}/api/")).unwrap(),
+            ))
+            .request_timeout(Duration::from_millis(10))
+            .build()
+            .unwrap();
+
+        let error = client.get_record(RecordId(1)).await.unwrap_err();
+        match error {
+            ZenodoError::Transport(source) => assert!(source.is_timeout()),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        server.abort();
     }
 }
