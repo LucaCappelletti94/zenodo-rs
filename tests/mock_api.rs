@@ -2320,6 +2320,51 @@ async fn action_methods_and_record_helpers_cover_remaining_public_branches() {
 }
 
 #[tokio::test]
+async fn action_methods_tolerate_empty_success_bodies_by_refreshing_depositions() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue(
+        Method::POST,
+        "/api/deposit/depositions/205/actions/discard",
+        QueuedResponse::bytes(StatusCode::NO_CONTENT, vec![], vec![]),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/205",
+        StatusCode::OK,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+
+    let deposition = client
+        .discard(DepositionId(205))
+        .await
+        .expect("discard refresh");
+    assert_eq!(deposition.id, DepositionId(205));
+    assert!(deposition.is_published());
+
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/deposit/depositions/205/actions/discard",
+            "/api/deposit/depositions/205"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn download_helpers_cover_remaining_branches() {
     let server = MockZenodoServer::start().await;
     let client = server.client();

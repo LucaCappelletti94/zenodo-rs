@@ -458,6 +458,29 @@ impl ZenodoClient {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
+    pub(crate) async fn execute_json_or_else<T, F, Fut>(
+        &self,
+        request: RequestBuilder,
+        on_empty: F,
+    ) -> Result<T, ZenodoError>
+    where
+        T: DeserializeOwned,
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Result<T, ZenodoError>>,
+    {
+        let response = request.send().await?;
+        if !response.status().is_success() {
+            return Err(ZenodoError::from_response(response).await);
+        }
+
+        let bytes = response.bytes().await?;
+        if bytes.is_empty() {
+            return on_empty().await;
+        }
+
+        Ok(serde_json::from_slice(&bytes)?)
+    }
+
     pub(crate) async fn execute_unit(&self, request: RequestBuilder) -> Result<(), ZenodoError> {
         let response = request.send().await?;
         if !response.status().is_success() {
@@ -640,10 +663,13 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo rejects the publish
     /// action.
     pub async fn publish(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request(
-            Method::POST,
-            &format!("deposit/depositions/{id}/actions/publish"),
-        )?)
+        self.execute_json_or_else(
+            self.request(
+                Method::POST,
+                &format!("deposit/depositions/{id}/actions/publish"),
+            )?,
+            || async move { self.get_deposition(id).await },
+        )
         .await
     }
 
@@ -654,10 +680,13 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo rejects the edit
     /// action.
     pub async fn edit(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request(
-            Method::POST,
-            &format!("deposit/depositions/{id}/actions/edit"),
-        )?)
+        self.execute_json_or_else(
+            self.request(
+                Method::POST,
+                &format!("deposit/depositions/{id}/actions/edit"),
+            )?,
+            || async move { self.get_deposition(id).await },
+        )
         .await
     }
 
@@ -668,10 +697,13 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo rejects the discard
     /// action.
     pub async fn discard(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request(
-            Method::POST,
-            &format!("deposit/depositions/{id}/actions/discard"),
-        )?)
+        self.execute_json_or_else(
+            self.request(
+                Method::POST,
+                &format!("deposit/depositions/{id}/actions/discard"),
+            )?,
+            || async move { self.get_deposition(id).await },
+        )
         .await
     }
 
@@ -682,10 +714,13 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo rejects the versioning
     /// action.
     pub async fn new_version(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request(
-            Method::POST,
-            &format!("deposit/depositions/{id}/actions/newversion"),
-        )?)
+        self.execute_json_or_else(
+            self.request(
+                Method::POST,
+                &format!("deposit/depositions/{id}/actions/newversion"),
+            )?,
+            || async move { self.get_deposition(id).await },
+        )
         .await
     }
 }
