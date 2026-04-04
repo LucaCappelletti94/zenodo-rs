@@ -7,6 +7,8 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 use url::Url;
 
+use crate::serde_util::deserialize_u64ish;
+
 macro_rules! id_newtype {
     ($(#[$meta:meta])* $name:ident) => {
         $(#[$meta])*
@@ -46,23 +48,6 @@ macro_rules! id_newtype {
             }
         }
     };
-}
-
-fn deserialize_u64ish<'de, D>(deserializer: D) -> Result<u64, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum U64ish {
-        Number(u64),
-        String(String),
-    }
-
-    match U64ish::deserialize(deserializer)? {
-        U64ish::Number(value) => Ok(value),
-        U64ish::String(value) => value.parse().map_err(serde::de::Error::custom),
-    }
 }
 
 id_newtype!(
@@ -270,10 +255,12 @@ mod tests {
         let deposition: DepositionId = serde_json::from_str("\"12\"").unwrap();
         let record: RecordId = serde_json::from_str("13").unwrap();
         let concept: ConceptRecId = serde_json::from_str("\"14\"").unwrap();
+        let float_record: RecordId = serde_json::from_str("15.0").unwrap();
 
         assert_eq!(deposition.0, 12);
         assert_eq!(record.0, 13);
         assert_eq!(concept.0, 14);
+        assert_eq!(float_record.0, 15);
     }
 
     #[test]

@@ -17,6 +17,7 @@ use crate::error::ZenodoError;
 use crate::ids::{Doi, DoiError, RecordId};
 use crate::model::{ArtifactInfo, Record, RecordFile};
 use crate::pagination::Page;
+use crate::serde_util::deserialize_u64ish;
 
 /// Selector for a published record.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -497,8 +498,11 @@ struct SearchHits<T> {
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum SearchTotal {
-    Number(u64),
-    Object { value: u64 },
+    Number(#[serde(deserialize_with = "deserialize_u64ish")] u64),
+    Object {
+        #[serde(deserialize_with = "deserialize_u64ish")]
+        value: u64,
+    },
 }
 
 impl SearchTotal {
@@ -818,7 +822,7 @@ fn record_matches_doi(record: &Record, doi: &Doi) -> bool {
 mod tests {
     use super::{
         record_matches_doi, ArtifactSelector, RecordQuery, RecordQueryStatus, RecordSelector,
-        RecordSort,
+        RecordSort, SearchEnvelope,
     };
     use crate::{Doi, Record, RecordId};
 
@@ -1015,5 +1019,28 @@ mod tests {
         assert!(record_matches_doi(&record, &doi));
         assert!(record_matches_doi(&concept_only, &doi));
         assert!(!record_matches_doi(&mismatch, &doi));
+    }
+
+    #[test]
+    fn search_totals_accept_integer_like_numeric_shapes() {
+        let from_number: SearchEnvelope<Record> = serde_json::from_value(serde_json::json!({
+            "hits": {
+                "hits": [],
+                "total": 14.0
+            }
+        }))
+        .unwrap();
+        let from_object: SearchEnvelope<Record> = serde_json::from_value(serde_json::json!({
+            "hits": {
+                "hits": [],
+                "total": {
+                    "value": "15"
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(super::Page::from(from_number).total, Some(14));
+        assert_eq!(super::Page::from(from_object).total, Some(15));
     }
 }

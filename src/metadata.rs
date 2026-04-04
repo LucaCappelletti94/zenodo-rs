@@ -20,6 +20,8 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
+use crate::serde_util::deserialize_option_u64ish;
+
 macro_rules! string_enum {
     ($(#[$enum_meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
         $(#[$enum_meta])*
@@ -620,10 +622,18 @@ impl RecordDateBuilder {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RecordVersionRelation {
     /// Zero-based index of the current version, when Zenodo reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_u64ish",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub index: Option<u64>,
     /// Total number of known versions, when Zenodo reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_u64ish",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub count: Option<u64>,
     /// Whether this version is the latest known version, when Zenodo reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2092,6 +2102,33 @@ mod tests {
         assert_eq!(
             metadata.thesis_university.as_deref(),
             Some("Example University")
+        );
+    }
+
+    #[test]
+    fn record_version_relations_accept_integer_like_numeric_shapes() {
+        let metadata: RecordMetadata = serde_json::from_str(
+            r#"{
+                "title": "Rich record",
+                "creators": [{ "name": "Doe, Jane" }],
+                "relations": {
+                    "version": [{ "index": "2", "count": 4.0, "is_last": true }]
+                }
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            metadata.relations,
+            Some(RecordRelations {
+                version: vec![RecordVersionRelation {
+                    index: Some(2),
+                    count: Some(4),
+                    is_last: Some(true),
+                    extra: std::collections::BTreeMap::default(),
+                }],
+                extra: std::collections::BTreeMap::default(),
+            })
         );
     }
 }

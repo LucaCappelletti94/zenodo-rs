@@ -35,6 +35,7 @@ pub mod model;
 pub mod pagination;
 pub mod poll;
 pub mod records;
+mod serde_util;
 pub mod upload;
 pub mod workflow;
 

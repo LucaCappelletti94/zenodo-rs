@@ -20,6 +20,7 @@ use url::Url;
 
 use crate::ids::{BucketUrl, ConceptRecId, DepositionFileId, DepositionId, Doi, RecordId};
 use crate::metadata::RecordMetadata;
+use crate::serde_util::{deserialize_option_u64ish, deserialize_stringish, deserialize_u64ish};
 
 macro_rules! string_enum {
     ($(#[$enum_meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
@@ -88,23 +89,6 @@ string_enum!(
     }
 );
 
-fn deserialize_stringish<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Stringish {
-        String(String),
-        Number(u64),
-    }
-
-    match Stringish::deserialize(deserializer)? {
-        Stringish::String(value) => Ok(value),
-        Stringish::Number(value) => Ok(value.to_string()),
-    }
-}
-
 /// Combined publication and processing status for a deposition.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct DepositionStatus {
@@ -124,7 +108,7 @@ pub struct DepositionFile {
     /// Original filename.
     pub filename: String,
     /// File size in bytes.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_u64ish")]
     pub filesize: u64,
     /// Reported checksum, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -232,7 +216,7 @@ pub struct BucketObject {
     /// Uploaded object key.
     pub key: String,
     /// Object size in bytes.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_u64ish")]
     pub size: u64,
     /// Reported checksum, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -264,7 +248,7 @@ pub struct RecordFile {
     /// File key used for downloads.
     pub key: String,
     /// File size in bytes.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_u64ish")]
     pub size: u64,
     /// Reported checksum, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -321,10 +305,18 @@ pub struct RecordLinks {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RecordStats {
     /// Number of downloads, when Zenodo reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_u64ish",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub downloads: Option<u64>,
     /// Number of views, when Zenodo reports it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_u64ish",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub views: Option<u64>,
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
@@ -447,7 +439,11 @@ pub struct Record {
     #[serde(default)]
     pub status: RecordPublicationStatus,
     /// Revision number, when present.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_option_u64ish",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub revision: Option<u64>,
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
@@ -497,7 +493,8 @@ pub struct PublishedRecord {
 #[cfg(test)]
 mod tests {
     use super::{
-        DepositState, Deposition, Record, RecordFile, RecordLinks, RecordPublicationStatus,
+        BucketObject, DepositState, Deposition, DepositionFile, Record, RecordFile, RecordLinks,
+        RecordPublicationStatus,
     };
 
     #[test]
@@ -593,6 +590,78 @@ mod tests {
             file.download_url().unwrap().as_str(),
             "https://zenodo.org/api/files/content"
         );
+    }
+
+    #[test]
+    fn deposition_file_accepts_integer_like_numeric_shapes() {
+        let float_file: DepositionFile = serde_json::from_value(serde_json::json!({
+            "id": "f1",
+            "filename": "artifact.bin",
+            "filesize": 14.0
+        }))
+        .unwrap();
+        assert_eq!(float_file.filesize, 14);
+
+        let string_file: DepositionFile = serde_json::from_value(serde_json::json!({
+            "id": "f2",
+            "filename": "artifact.bin",
+            "filesize": "18"
+        }))
+        .unwrap();
+        assert_eq!(string_file.filesize, 18);
+    }
+
+    #[test]
+    fn deposition_file_rejects_non_integral_sizes() {
+        let error = serde_json::from_value::<DepositionFile>(serde_json::json!({
+            "id": "f1",
+            "filename": "artifact.bin",
+            "filesize": 14.5
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("integer-like"));
+    }
+
+    #[test]
+    fn other_numeric_response_fields_accept_integer_like_shapes() {
+        let uploaded: BucketObject = serde_json::from_value(serde_json::json!({
+            "key": "artifact.bin",
+            "size": "14"
+        }))
+        .unwrap();
+        let published_file: RecordFile = serde_json::from_value(serde_json::json!({
+            "id": "f1",
+            "key": "artifact.bin",
+            "size": 15.0,
+            "links": {}
+        }))
+        .unwrap();
+        let record: Record = serde_json::from_value(serde_json::json!({
+            "id": 42.0,
+            "recid": 42.0,
+            "metadata": { "title": "artifact" },
+            "files": [],
+            "links": {},
+            "stats": {
+                "downloads": "16",
+                "views": 17.0
+            },
+            "revision": "18"
+        }))
+        .unwrap();
+
+        assert_eq!(uploaded.size, 14);
+        assert_eq!(published_file.size, 15);
+        assert_eq!(record.id.0, 42);
+        assert_eq!(
+            record.stats.as_ref().and_then(|stats| stats.downloads),
+            Some(16)
+        );
+        assert_eq!(
+            record.stats.as_ref().and_then(|stats| stats.views),
+            Some(17)
+        );
+        assert_eq!(record.revision, Some(18));
     }
 
     #[test]
