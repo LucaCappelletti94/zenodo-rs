@@ -9,19 +9,153 @@ mod support;
 
 use std::io::Cursor;
 
-use zenodo_rs::{ArtifactSelector, DepositState, FileReplacePolicy, UploadSpec, ZenodoError};
+use futures_util::StreamExt;
+use zenodo_rs::{
+    ArtifactSelector, DepositState, FileReplacePolicy, RecordQuery, UploadSpec, ZenodoError,
+};
 
 use crate::support::{
-    download_path, live_client, metadata, path_upload, reader_upload, unique_suffix,
-    wait_for_latest_by_doi,
+    deposition_id_from_url, download_path, live_client, metadata, path_upload, reader_upload, step,
+    unique_suffix, wait_for_draft_deposition, wait_for_latest_by_doi,
+    wait_for_published_deposition,
 };
 
 #[tokio::test]
 #[ignore = "requires ZENODO_SANDBOX_TOKEN and live sandbox publishing permissions"]
-async fn daily_sandbox_smoke_covers_full_live_api_surface() {
+async fn daily_sandbox_low_level_deposition_api_surface() {
+    let _step = step("low-level deposition api surface");
+    let client = live_client();
+    let run_suffix = unique_suffix("lowlevel");
+
+    let _step = step("create deposition and update metadata");
+    let draft = client
+        .create_deposition()
+        .await
+        .expect("create low-level draft");
+    let draft = client
+        .update_metadata(
+            draft.id,
+            &metadata("zenodo-rs daily low-level smoke", Some("0.1.0")),
+        )
+        .await
+        .expect("update low-level draft metadata");
+    let bucket = draft.bucket_url().cloned().expect("draft bucket url");
+
+    let payload_a = format!("low-level-a-{run_suffix}.txt");
+    let payload_b = format!("low-level-b-{run_suffix}.bin");
+
+    let _step = step("upload path and reader through low-level apis");
+    let (_a_dir, upload_a) = path_upload(&payload_a, b"low-level path upload");
+    let uploaded_a = match upload_a.source {
+        zenodo_rs::UploadSource::Path(path) => client
+            .upload_path(&bucket, &upload_a.filename, &path)
+            .await
+            .expect("upload path directly"),
+        zenodo_rs::UploadSource::Reader { .. } => panic!("expected path upload"),
+    };
+    assert_eq!(uploaded_a.key, payload_a);
+
+    let uploaded_b = client
+        .upload_reader(
+            &bucket,
+            &payload_b,
+            Cursor::new(b"low-level reader upload".to_vec()),
+            23,
+            mime::APPLICATION_OCTET_STREAM,
+        )
+        .await
+        .expect("upload reader directly");
+    assert_eq!(uploaded_b.key, payload_b);
+
+    let _step = step("list and delete draft files");
+    let files = client
+        .list_files(draft.id)
+        .await
+        .expect("list low-level files");
+    assert!(files.iter().any(|file| file.filename == payload_a));
+    let extra = files
+        .iter()
+        .find(|file| file.filename == payload_b)
+        .expect("uploaded reader file");
+    client
+        .delete_file(draft.id, extra.id.clone())
+        .await
+        .expect("delete low-level uploaded file");
+
+    let remaining = client
+        .list_files(draft.id)
+        .await
+        .expect("list remaining files");
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].filename, payload_a);
+
+    let _step = step("publish directly and resolve the published record");
+    let published = client.publish(draft.id).await.expect("direct publish");
+    let published = wait_for_published_deposition(&client, published.id).await;
+    let record_id = published.record_id.expect("published record id");
+    let first_record = client
+        .get_record(record_id)
+        .await
+        .expect("fetch first low-level published record");
+
+    let _step = step("edit discard and version directly");
+    let edited = client.edit(published.id).await.expect("direct edit");
+    assert!(
+        edited.status.state == DepositState::InProgress || edited.latest_draft_url().is_some(),
+        "edit should expose an editable state or a draft link"
+    );
+    let discarded = client.discard(edited.id).await.expect("direct discard");
+    assert!(discarded.is_published());
+
+    let versioned = client
+        .new_version(published.id)
+        .await
+        .expect("direct new version");
+    let latest_draft = versioned
+        .latest_draft_url()
+        .cloned()
+        .expect("latest draft url");
+    let latest_draft_id = deposition_id_from_url(&latest_draft);
+    let latest_draft = wait_for_draft_deposition(&client, latest_draft_id).await;
+
+    let payload_v2 = format!("low-level-v2-{run_suffix}.txt");
+    let (_v2_dir, upload_v2) = path_upload(&payload_v2, b"second version");
+    let bucket_v2 = latest_draft
+        .bucket_url()
+        .cloned()
+        .expect("new version bucket url");
+    match upload_v2.source {
+        zenodo_rs::UploadSource::Path(path) => client
+            .upload_path(&bucket_v2, &upload_v2.filename, &path)
+            .await
+            .expect("upload second version path"),
+        zenodo_rs::UploadSource::Reader { .. } => panic!("expected path upload"),
+    };
+
+    let republished = client
+        .publish(latest_draft.id)
+        .await
+        .expect("publish second version directly");
+    let republished = wait_for_published_deposition(&client, republished.id).await;
+    let latest_record = client
+        .get_latest_record(first_record.id)
+        .await
+        .expect("resolve latest after direct versioning");
+    assert_eq!(
+        republished.record_id,
+        Some(latest_record.id),
+        "republished deposition should point at the latest record"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ZENODO_SANDBOX_TOKEN and live sandbox publishing permissions"]
+async fn daily_sandbox_workflow_and_read_api_surface() {
+    let _step = step("workflow and read api surface");
     let client = live_client();
     let run_suffix = unique_suffix("daily");
 
+    let _step = step("create draft and verify initial state");
     let initial_draft = client
         .create_deposition()
         .await
@@ -37,6 +171,7 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         "newly created depositions must start unpublished"
     );
 
+    let _step = step("exercise all draft file reconciliation policies");
     let unique_a = format!("daily-{run_suffix}-a.txt");
     let unique_b = format!("daily-{run_suffix}-b.bin");
     let (_a_dir, upload_a) = path_upload(&unique_a, b"draft smoke v1");
@@ -112,6 +247,7 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
     assert_eq!(files_after_delete.len(), 1);
     assert_eq!(files_after_delete[0].filename, unique_a);
 
+    let _step = step("publish first version through workflow helper");
     let (_v1_dir, v1_upload) = path_upload("payload.txt", format!("v1 {run_suffix}\n").as_bytes());
     let first_published = client
         .publish_dataset_with_policy(
@@ -133,6 +269,7 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         .expect("fetch first published record by id");
     assert_eq!(record_by_id.id, first_record.id);
 
+    let _step = step("enter edit mode and discard transient changes");
     let editable = client
         .enter_edit_mode(first_published.deposition.id)
         .await
@@ -147,6 +284,7 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         .expect("discard transient edit mode changes");
     assert!(discarded.is_published());
 
+    let _step = step("publish second version through policy-aware helper");
     let (_v2_dir, v2_upload) = path_upload("payload.txt", format!("v2 {run_suffix}\n").as_bytes());
     let second_published = client
         .publish_dataset_with_policy(
@@ -165,6 +303,7 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         "publishing a new version should yield a new record id"
     );
 
+    let _step = step("exercise latest-resolution and search helpers");
     let latest_by_doi = wait_for_latest_by_doi(&client, &version_doi, latest_record.id).await;
     let latest_by_id = client
         .get_latest_record(first_record.id)
@@ -178,7 +317,28 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         .await
         .expect("resolve original DOI through records search");
     assert_eq!(record_by_latest_doi.id, first_record.id);
+    let latest_by_doi_str = client
+        .resolve_latest_by_doi_str(version_doi.as_str())
+        .await
+        .expect("resolve latest by DOI string");
+    assert_eq!(latest_by_doi_str.id, latest_record.id);
+    let search = client
+        .search_records(
+            &RecordQuery::builder()
+                .query(format!("recid:{}", latest_record.id.0))
+                .build(),
+        )
+        .await
+        .expect("search records by recid");
+    assert!(
+        search
+            .hits
+            .iter()
+            .any(|record| record.id == latest_record.id),
+        "search results should include the latest record"
+    );
 
+    let _step = step("exercise version listing and artifact info helpers");
     let versions = client
         .list_record_versions(latest_record.id)
         .await
@@ -209,6 +369,20 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         .await
         .expect("artifact info from original DOI");
     assert_eq!(artifact_info_by_doi.latest.id, latest_record.id);
+
+    let _step = step("exercise download and streaming helpers");
+    let mut stream = client
+        .open_artifact(&ArtifactSelector::file(
+            latest_record.id,
+            "payload.txt".to_owned(),
+        ))
+        .await
+        .expect("open artifact stream");
+    let mut streamed = Vec::new();
+    while let Some(chunk) = stream.stream.next().await {
+        streamed.extend_from_slice(&chunk.expect("stream chunk"));
+    }
+    assert_eq!(streamed, format!("v2 {run_suffix}\n").into_bytes());
 
     let (_latest_dir, latest_path) = download_path("payload-latest.txt");
     let latest_download = client

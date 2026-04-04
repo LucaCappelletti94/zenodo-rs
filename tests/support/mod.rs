@@ -12,12 +12,21 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
+use url::Url;
 use zenodo_rs::{
-    AccessRight, Auth, DepositMetadataUpdate, Doi, PollOptions, Record, RecordId, UploadSpec,
-    UploadType, ZenodoClient,
+    AccessRight, Auth, DepositMetadataUpdate, Deposition, DepositionId, Doi, PollOptions, Record,
+    RecordId, UploadSpec, UploadType, ZenodoClient, ZenodoError,
 };
 
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+pub struct StepLog;
+
+impl Drop for StepLog {
+    fn drop(&mut self) {
+        eprintln!("::endgroup::");
+    }
+}
 
 pub fn live_client() -> ZenodoClient {
     ZenodoClient::builder(Auth::from_sandbox_env().expect("sandbox token"))
@@ -43,6 +52,11 @@ pub fn unique_suffix(label: &str) -> String {
     let run_attempt = std::env::var("GITHUB_RUN_ATTEMPT").unwrap_or_else(|_| "0".to_owned());
     let sequence = UNIQUE_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{label}-{run_id}-{run_attempt}-{sequence}")
+}
+
+pub fn step(name: impl AsRef<str>) -> StepLog {
+    eprintln!("::group::{}", name.as_ref());
+    StepLog
 }
 
 pub fn metadata(title_prefix: &str, version: Option<&str>) -> DepositMetadataUpdate {
@@ -111,4 +125,77 @@ pub async fn wait_for_latest_by_doi(
         );
         tokio::time::sleep(delay).await;
     }
+}
+
+pub async fn wait_for_published_deposition(client: &ZenodoClient, id: DepositionId) -> Deposition {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(180);
+    let delay = Duration::from_secs(2);
+
+    loop {
+        let last_error = match client.get_deposition(id).await {
+            Ok(deposition) if deposition.is_published() && deposition.record_id.is_some() => {
+                return deposition;
+            }
+            Ok(deposition) => format!(
+                "published={} state={:?} record_id={:?}",
+                deposition.is_published(),
+                deposition.status.state,
+                deposition.record_id
+            ),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            started.elapsed() < timeout,
+            "timed out waiting for deposition {id} to publish: {}",
+            last_error
+        );
+        tokio::time::sleep(delay).await;
+    }
+}
+
+pub async fn wait_for_draft_deposition(client: &ZenodoClient, id: DepositionId) -> Deposition {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(120);
+    let delay = Duration::from_secs(2);
+
+    loop {
+        let last_error = match client.get_deposition(id).await {
+            Ok(deposition) if deposition.status.state == zenodo_rs::DepositState::InProgress => {
+                return deposition;
+            }
+            Ok(deposition) => format!(
+                "published={} state={:?}",
+                deposition.is_published(),
+                deposition.status.state
+            ),
+            Err(error) => match error {
+                ZenodoError::Http { status, .. }
+                    if status == reqwest::StatusCode::CONFLICT
+                        || status == reqwest::StatusCode::TOO_MANY_REQUESTS =>
+                {
+                    error.to_string()
+                }
+                _ => error.to_string(),
+            },
+        };
+
+        assert!(
+            started.elapsed() < timeout,
+            "timed out waiting for draft deposition {id}: {}",
+            last_error
+        );
+        tokio::time::sleep(delay).await;
+    }
+}
+
+pub fn deposition_id_from_url(url: &Url) -> DepositionId {
+    let id = url
+        .path_segments()
+        .and_then(Iterator::last)
+        .unwrap_or_else(|| panic!("missing deposition id segment in {url}"))
+        .parse::<u64>()
+        .unwrap_or_else(|error| panic!("invalid deposition id in {url}: {error}"));
+    DepositionId(id)
 }

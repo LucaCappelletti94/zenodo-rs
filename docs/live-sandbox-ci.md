@@ -9,6 +9,16 @@ The daily workflow is self-contained. Each run creates and publishes its own
 tiny sandbox artifacts, then uses those fresh artifacts to exercise the rest of
 the API surface.
 
+The live suite is intentionally split into multiple named tests so failures are
+easier to localize in CI logs:
+
+- low-level deposition API surface
+- workflow/versioning surface
+- records/downloads surface
+
+The tests also emit grouped step logs under `--nocapture`, so the GitHub Actions
+output shows which live phase failed.
+
 - feature-matrix builds and tests
 - create draft
 - update metadata
