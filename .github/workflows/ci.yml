@@ -39,9 +39,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check documentation and workflow links
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@v2.7.0
         with:
           args: README.md docs/live-sandbox-ci.md .github/workflows/*.yml
+          lycheeVersion: v0.21.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
