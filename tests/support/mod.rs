@@ -9,18 +9,15 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tempfile::TempDir;
 use zenodo_rs::{
-    AccessRight, Auth, DepositMetadataUpdate, DepositionId, PollOptions, UploadSpec, UploadType,
-    ZenodoClient,
+    AccessRight, Auth, DepositMetadataUpdate, Doi, PollOptions, Record, RecordId, UploadSpec,
+    UploadType, ZenodoClient,
 };
 
 static UNIQUE_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub const DRAFT_ID_ENV_VAR: &str = "ZENODO_SANDBOX_DRAFT_DEPOSITION_ID";
-pub const RECORD_DOI_ENV_VAR: &str = "ZENODO_SANDBOX_RECORD_DOI";
 
 pub fn live_client() -> ZenodoClient {
     ZenodoClient::builder(Auth::from_sandbox_env().expect("sandbox token"))
@@ -39,18 +36,6 @@ pub fn live_client() -> ZenodoClient {
 
 pub fn required_env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("missing required environment variable {name}"))
-}
-
-pub fn draft_deposition_id() -> DepositionId {
-    DepositionId(
-        required_env(DRAFT_ID_ENV_VAR)
-            .parse()
-            .expect("valid sandbox draft deposition id"),
-    )
-}
-
-pub fn published_record_doi() -> String {
-    required_env(RECORD_DOI_ENV_VAR)
 }
 
 pub fn unique_suffix(label: &str) -> String {
@@ -98,4 +83,32 @@ pub fn download_path(name: &str) -> (TempDir, PathBuf) {
     let dir = tempfile::tempdir().expect("temp dir");
     let path = dir.path().join(name);
     (dir, path)
+}
+
+pub async fn wait_for_latest_by_doi(
+    client: &ZenodoClient,
+    doi: &Doi,
+    expected: RecordId,
+) -> Record {
+    let started = Instant::now();
+    let timeout = Duration::from_secs(120);
+    let delay = Duration::from_secs(2);
+
+    loop {
+        let last_error = match client.resolve_latest_by_doi(doi).await {
+            Ok(record) if record.id == expected => return record,
+            Ok(record) => format!(
+                "resolved latest record {} instead of expected {}",
+                record.id, expected
+            ),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(
+            started.elapsed() < timeout,
+            "timed out waiting for DOI {doi} to resolve latest record {expected}: {}",
+            last_error
+        );
+        tokio::time::sleep(delay).await;
+    }
 }
