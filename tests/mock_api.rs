@@ -2027,7 +2027,7 @@ async fn enter_edit_mode_waits_for_current_record_to_become_editable() {
         json!({
             "id": 95,
             "submitted": true,
-            "state": "inprogress",
+            "state": "done",
             "metadata": {},
             "files": [],
             "links": {}
@@ -2046,28 +2046,14 @@ async fn enter_edit_mode_waits_for_current_record_to_become_editable() {
             "links": {}
         }),
     );
-    server.enqueue_json(
-        Method::GET,
-        "/api/deposit/depositions/95",
-        StatusCode::OK,
-        json!({
-            "id": 95,
-            "submitted": false,
-            "state": "inprogress",
-            "metadata": {},
-            "files": [],
-            "links": {
-                "bucket": server.url("files/bucket-95")
-            }
-        }),
-    );
 
     let draft = client
         .enter_edit_mode(DepositionId(95))
         .await
         .expect("edit mode");
     assert_eq!(draft.id, DepositionId(95));
-    assert!(!draft.is_published());
+    assert!(draft.is_published());
+    assert_eq!(draft.status.state, zenodo_rs::DepositState::InProgress);
 }
 
 #[tokio::test]
@@ -2132,6 +2118,83 @@ async fn enter_edit_mode_reuses_unpublished_or_immediately_editable_depositions(
         .expect("immediately editable");
     assert_eq!(edited.id, DepositionId(97));
     assert!(!edited.is_published());
+}
+
+#[tokio::test]
+async fn enter_edit_mode_can_follow_latest_draft_link() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/98",
+        StatusCode::OK,
+        json!({
+            "id": 98,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/98")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/98/actions/edit",
+        StatusCode::CREATED,
+        json!({
+            "id": 98,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/98"),
+                "latest_draft": server.url("deposit/depositions/99")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/98",
+        StatusCode::OK,
+        json!({
+            "id": 98,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/98"),
+                "latest_draft": server.url("deposit/depositions/99")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/99",
+        StatusCode::OK,
+        json!({
+            "id": 99,
+            "submitted": false,
+            "state": "inprogress",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/99"),
+                "bucket": server.url("files/bucket-99")
+            }
+        }),
+    );
+
+    let draft = client
+        .enter_edit_mode(DepositionId(98))
+        .await
+        .expect("latest draft edit mode");
+    assert_eq!(draft.id, DepositionId(99));
+    assert!(!draft.is_published());
 }
 
 #[tokio::test]

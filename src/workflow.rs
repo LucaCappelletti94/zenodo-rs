@@ -22,7 +22,7 @@ use crate::client::ZenodoClient;
 use crate::error::ZenodoError;
 use crate::ids::DepositionId;
 use crate::metadata::DepositMetadataUpdate;
-use crate::model::{Deposition, PublishedRecord};
+use crate::model::{DepositState, Deposition, PublishedRecord};
 use crate::upload::{FileReplacePolicy, UploadSource, UploadSpec};
 
 /// Action needed to obtain an editable draft.
@@ -64,6 +64,10 @@ pub fn editable_draft_action(deposition: &Deposition) -> EditableDraftAction {
     } else {
         EditableDraftAction::ReuseExisting
     }
+}
+
+fn deposition_allows_metadata_edits(deposition: &Deposition) -> bool {
+    matches!(deposition.status.state, DepositState::InProgress)
 }
 
 pub(crate) fn file_ids_to_delete(
@@ -161,16 +165,29 @@ impl ZenodoClient {
         }
 
         let edited = self.edit(id).await?;
-        if !edited.is_published() {
+        if deposition_allows_metadata_edits(&edited) {
             return Ok(edited);
         }
 
         self.poll_until("edit mode", || async move {
             let deposition = self.get_deposition(id).await?;
-            if deposition.is_published() {
-                Ok(None)
+            if deposition_allows_metadata_edits(&deposition) {
+                return Ok(Some(deposition));
+            }
+
+            if let Some(latest_draft) = deposition.latest_draft_url().cloned() {
+                if deposition.links.self_.as_ref() == Some(&latest_draft) {
+                    return Ok(None);
+                }
+
+                match self.get_deposition_by_url(&latest_draft).await {
+                    Ok(draft) if deposition_allows_metadata_edits(&draft) => Ok(Some(draft)),
+                    Ok(_) => Ok(None),
+                    Err(error) if retryable_error(&error) => Ok(None),
+                    Err(error) => Err(error),
+                }
             } else {
-                Ok(Some(deposition))
+                Ok(None)
             }
         })
         .await
