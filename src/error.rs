@@ -253,12 +253,7 @@ fn trimmed_body(body: &[u8]) -> Option<String> {
         }
     }
 
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    Some(trimmed.chars().take(512).collect())
+    None
 }
 
 #[cfg(test)]
@@ -433,6 +428,12 @@ mod tests {
             trimmed_body(b"   single line without newline   "),
             Some("single line without newline".into())
         );
+    }
+
+    #[test]
+    fn field_error_parser_ignores_unknown_array_items() {
+        let parsed = parse_field_errors(&json!([42, true, null])).unwrap();
+        assert!(parsed.is_empty());
     }
 
     #[tokio::test]

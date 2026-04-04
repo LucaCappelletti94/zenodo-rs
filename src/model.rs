@@ -395,13 +395,13 @@ pub struct RecordParent {
 }
 
 /// Published record resource returned by Zenodo's records API.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Record {
     /// Record creation timestamp, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created: Option<DateTime<Utc>>,
     /// Record modification timestamp, when present.
-    #[serde(default, skip_serializing_if = "Option::is_none", alias = "updated")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<DateTime<Utc>>,
     /// Record identifier.
     pub id: RecordId,
@@ -450,6 +450,70 @@ pub struct Record {
     pub extra: BTreeMap<String, Value>,
 }
 
+#[derive(Deserialize)]
+struct RecordWire {
+    #[serde(default)]
+    created: Option<DateTime<Utc>>,
+    #[serde(default)]
+    modified: Option<DateTime<Utc>>,
+    #[serde(default)]
+    updated: Option<DateTime<Utc>>,
+    id: RecordId,
+    #[serde(deserialize_with = "deserialize_stringish")]
+    recid: String,
+    #[serde(default)]
+    conceptrecid: Option<ConceptRecId>,
+    #[serde(default)]
+    doi: Option<Doi>,
+    #[serde(default)]
+    conceptdoi: Option<Doi>,
+    #[serde(default)]
+    metadata: RecordMetadata,
+    #[serde(default)]
+    files: Vec<RecordFile>,
+    #[serde(default)]
+    links: RecordLinks,
+    #[serde(default)]
+    parent: Option<RecordParent>,
+    #[serde(default)]
+    pids: Option<RecordPids>,
+    #[serde(default)]
+    stats: Option<RecordStats>,
+    #[serde(default)]
+    status: RecordPublicationStatus,
+    #[serde(default, deserialize_with = "deserialize_option_u64ish")]
+    revision: Option<u64>,
+    #[serde(flatten, default)]
+    extra: BTreeMap<String, Value>,
+}
+
+impl<'de> Deserialize<'de> for Record {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let wire = RecordWire::deserialize(deserializer)?;
+        Ok(Self {
+            created: wire.created,
+            modified: wire.modified.or(wire.updated),
+            id: wire.id,
+            recid: wire.recid,
+            conceptrecid: wire.conceptrecid,
+            doi: wire.doi,
+            conceptdoi: wire.conceptdoi,
+            metadata: wire.metadata,
+            files: wire.files,
+            links: wire.links,
+            parent: wire.parent,
+            pids: wire.pids,
+            stats: wire.stats,
+            status: wire.status,
+            revision: wire.revision,
+            extra: wire.extra,
+        })
+    }
+}
+
 impl Record {
     /// Returns the link to the latest record version, when present.
     #[must_use]
@@ -496,10 +560,11 @@ mod tests {
         BucketObject, DepositState, Deposition, DepositionFile, Record, RecordFile, RecordLinks,
         RecordPublicationStatus,
     };
+    use serde_json::json;
 
     #[test]
     fn preserves_unknown_record_fields() {
-        let record: Record = serde_json::from_value(serde_json::json!({
+        let record: Record = serde_json::from_value(json!({
             "created": "2026-04-03T12:00:00+00:00",
             "updated": "2026-04-03T13:00:00+00:00",
             "id": 42,
@@ -548,10 +613,39 @@ mod tests {
                 .map(|pid| pid.identifier.as_str()),
             Some("10.5281/zenodo.42")
         );
+        assert_eq!(record.extra.get("mystery"), Some(&json!("value")));
+    }
+
+    #[test]
+    fn record_accepts_both_modified_and_updated_timestamps() {
+        let record: Record = serde_json::from_value(json!({
+            "created": "2026-04-03T12:00:00+00:00",
+            "modified": "2026-04-03T14:00:00+00:00",
+            "updated": "2026-04-03T13:00:00+00:00",
+            "id": 42,
+            "recid": 42.0,
+            "metadata": { "title": "artifact" },
+            "files": [],
+            "links": {}
+        }))
+        .unwrap();
+
+        assert!(record.created.is_some());
         assert_eq!(
-            record.extra.get("mystery"),
-            Some(&serde_json::Value::String("value".into()))
+            record.modified.unwrap().to_rfc3339(),
+            "2026-04-03T14:00:00+00:00"
         );
+    }
+
+    #[test]
+    fn model_string_enums_preserve_unknown_values() {
+        let state: DepositState = serde_json::from_value(json!("queued")).unwrap();
+        let status: RecordPublicationStatus = serde_json::from_value(json!("embargoed")).unwrap();
+
+        assert_eq!(serde_json::to_value(&state).unwrap(), json!("queued"));
+        assert_eq!(serde_json::to_value(&status).unwrap(), json!("embargoed"));
+        assert!(matches!(state, DepositState::Unknown(value) if value == "queued"));
+        assert!(matches!(status, RecordPublicationStatus::Unknown(value) if value == "embargoed"));
     }
 
     #[test]

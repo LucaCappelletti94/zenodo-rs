@@ -185,6 +185,12 @@ mod tests {
                 .value,
             14
         );
+        assert_eq!(
+            serde_json::from_value::<U64Holder>(serde_json::json!({ "value": 15_i64 }))
+                .unwrap()
+                .value,
+            15
+        );
     }
 
     #[test]
@@ -214,6 +220,11 @@ mod tests {
                 .unwrap(),
             OptionalU64Holder { value: Some(15) }
         );
+        assert_eq!(
+            serde_json::from_value::<OptionalU64Holder>(serde_json::json!({ "value": 16.0 }))
+                .unwrap(),
+            OptionalU64Holder { value: Some(16) }
+        );
     }
 
     #[test]
@@ -228,5 +239,21 @@ mod tests {
             serde_json::from_value::<StringHolder>(serde_json::json!({ "value": 16.0 })).unwrap(),
             StringHolder { value: "16".into() }
         );
+        assert_eq!(
+            serde_json::from_value::<StringHolder>(serde_json::json!({ "value": 17 })).unwrap(),
+            StringHolder { value: "17".into() }
+        );
+    }
+
+    #[test]
+    fn stringish_rejects_negative_or_fractional_numbers() {
+        let negative =
+            serde_json::from_value::<StringHolder>(serde_json::json!({ "value": -1 })).unwrap_err();
+        let fractional =
+            serde_json::from_value::<StringHolder>(serde_json::json!({ "value": 1.5 }))
+                .unwrap_err();
+
+        assert!(!negative.to_string().is_empty());
+        assert!(fractional.to_string().contains("integer-like"));
     }
 }

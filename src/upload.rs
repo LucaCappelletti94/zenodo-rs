@@ -82,12 +82,7 @@ impl UploadSpec {
         let filename = path
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "path has no final file name segment",
-                )
-            })?;
+            .ok_or_else(path_without_filename_error)?;
 
         Ok(Self {
             content_type: mime::APPLICATION_OCTET_STREAM,
@@ -135,11 +130,18 @@ impl UploadSpec {
     }
 }
 
+fn path_without_filename_error() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "path has no final file name segment",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
 
-    use super::{UploadSource, UploadSpec};
+    use super::{path_without_filename_error, UploadSource, UploadSpec};
 
     #[test]
     fn path_upload_defaults_to_octet_stream() {
@@ -152,6 +154,13 @@ mod tests {
     fn path_upload_rejects_missing_filename() {
         let error = UploadSpec::from_path(PathBuf::from("/")).unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn missing_filename_error_has_stable_message() {
+        let error = path_without_filename_error();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(error.to_string(), "path has no final file name segment");
     }
 
     #[test]

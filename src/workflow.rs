@@ -537,6 +537,10 @@ mod tests {
     use crate::model::Deposition;
     use crate::upload::{FileReplacePolicy, UploadSpec};
     use crate::{Endpoint, PollOptions};
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use tokio::net::TcpListener;
+    use url::Url;
 
     #[test]
     fn unpublished_deposition_reuses_current_draft() {
@@ -761,5 +765,108 @@ mod tests {
 
         assert!(matches!(error, ZenodoError::Timeout("probe")));
         assert!(started.elapsed() < Duration::from_millis(80));
+    }
+
+    #[tokio::test]
+    async fn latest_published_deposition_short_circuits_when_resolution_is_not_needed() {
+        let client = ZenodoClient::new(Auth::new("token")).unwrap();
+        let unpublished: Deposition = serde_json::from_value(serde_json::json!({
+            "id": 10,
+            "submitted": false,
+            "state": "inprogress",
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }))
+        .unwrap();
+        let already_latest: Deposition = serde_json::from_value(serde_json::json!({
+            "id": 11,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": "https://zenodo.example/api/deposit/depositions/11",
+                "latest": "https://zenodo.example/api/deposit/depositions/11"
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(
+            client
+                .latest_published_deposition_for_new_version(unpublished.clone())
+                .await
+                .unwrap()
+                .id,
+            unpublished.id
+        );
+        assert_eq!(
+            client
+                .latest_published_deposition_for_new_version(already_latest.clone())
+                .await
+                .unwrap()
+                .id,
+            already_latest.id
+        );
+    }
+
+    #[tokio::test]
+    async fn latest_published_deposition_url_resolves_record_links_and_rejects_unknown_paths() {
+        async fn record() -> Json<serde_json::Value> {
+            Json(serde_json::json!({
+                "id": 22,
+                "recid": "22",
+                "metadata": { "title": "record" },
+                "files": [],
+                "links": {}
+            }))
+        }
+
+        async fn deposition() -> Json<serde_json::Value> {
+            Json(serde_json::json!({
+                "id": 22,
+                "submitted": true,
+                "state": "done",
+                "metadata": {},
+                "files": [],
+                "links": {}
+            }))
+        }
+
+        let app = Router::new()
+            .route("/api/records/22", get(record))
+            .route("/api/deposit/depositions/22", get(deposition));
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let client = ZenodoClient::builder(Auth::new("token"))
+            .endpoint(Endpoint::Custom(
+                Url::parse(&format!("http://{addr}/api/")).unwrap(),
+            ))
+            .build()
+            .unwrap();
+
+        let resolved = client
+            .resolve_latest_published_deposition_url(
+                &Url::parse(&format!("http://{addr}/api/records/22")).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resolved.id.0, 22);
+
+        let error = client
+            .resolve_latest_published_deposition_url(
+                &Url::parse(&format!("http://{addr}/something/else")).unwrap(),
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, ZenodoError::InvalidState(message) if message.contains("unsupported latest published deposition link"))
+        );
+
+        server.abort();
     }
 }

@@ -894,6 +894,80 @@ async fn doi_resolution_requires_exact_match_and_can_follow_next_page() {
 }
 
 #[tokio::test]
+async fn doi_string_helpers_cover_success_paths() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": {
+                "hits": [json!({
+                    "id": 700,
+                    "recid": 700.0,
+                    "doi": "10.5281/zenodo.700",
+                    "metadata": { "title": "v1" },
+                    "files": [],
+                    "links": {
+                        "latest": server.url("records/701")
+                    }
+                })],
+                "total": 1
+            },
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": {
+                "hits": [json!({
+                    "id": 700,
+                    "recid": 700,
+                    "doi": "10.5281/zenodo.700",
+                    "metadata": { "title": "v1" },
+                    "files": [],
+                    "links": {
+                        "latest": server.url("records/701")
+                    }
+                })],
+                "total": 1
+            },
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/701",
+        StatusCode::OK,
+        json!({
+            "id": 701,
+            "recid": 701,
+            "doi": "10.5281/zenodo.701",
+            "metadata": { "title": "v2" },
+            "files": [],
+            "links": {}
+        }),
+    );
+
+    let direct = client
+        .get_record_by_doi_str("doi:10.5281/ZENODO.700")
+        .await
+        .expect("record from doi string");
+    assert_eq!(direct.id, RecordId(700));
+
+    let latest = client
+        .resolve_latest_by_doi_str("https://doi.org/10.5281/zenodo.700")
+        .await
+        .expect("latest from doi string");
+    assert_eq!(latest.id, RecordId(701));
+}
+
+#[tokio::test]
 async fn failed_download_preserves_existing_destination_file() {
     let server = MockZenodoServer::start().await;
     let client = server.client();

@@ -824,7 +824,9 @@ mod tests {
         record_matches_doi, ArtifactSelector, RecordQuery, RecordQueryStatus, RecordSelector,
         RecordSort, SearchEnvelope,
     };
-    use crate::{Doi, Record, RecordId};
+    use crate::client::{Auth, ZenodoClient};
+    use crate::{Doi, Endpoint, Record, RecordId, ZenodoError};
+    use url::Url;
 
     #[test]
     fn query_serialization_uses_zenodo_parameter_names() {
@@ -1042,5 +1044,35 @@ mod tests {
 
         assert_eq!(super::Page::from(from_number).total, Some(14));
         assert_eq!(super::Page::from(from_object).total, Some(15));
+    }
+
+    #[tokio::test]
+    async fn doi_string_helpers_reject_invalid_selectors_before_requesting() {
+        let client = ZenodoClient::builder(Auth::new("token"))
+            .endpoint(Endpoint::Custom(
+                Url::parse("http://localhost:9/api/").unwrap(),
+            ))
+            .build()
+            .unwrap();
+
+        let get_error = client
+            .get_record_by_doi_str("definitely not a doi")
+            .await
+            .unwrap_err();
+        let latest_error = client
+            .resolve_latest_by_doi_str("still not a doi")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            get_error,
+            ZenodoError::UnsupportedSelector(message)
+            if message.starts_with("invalid DOI selector:")
+        ));
+        assert!(matches!(
+            latest_error,
+            ZenodoError::UnsupportedSelector(message)
+            if message.starts_with("invalid DOI selector:")
+        ));
     }
 }
