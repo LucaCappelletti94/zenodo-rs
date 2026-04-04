@@ -117,6 +117,13 @@ async fn daily_sandbox_low_level_deposition_api_surface() {
         .expect("latest draft url");
     let latest_draft_id = deposition_id_from_url(&latest_draft);
     let latest_draft = wait_for_draft_deposition(&client, latest_draft_id).await;
+    let latest_draft = client
+        .update_metadata(
+            latest_draft.id,
+            &metadata("zenodo-rs daily low-level smoke", Some("0.2.0")),
+        )
+        .await
+        .expect("refresh new version metadata before publish");
 
     let payload_v2 = format!("low-level-v2-{run_suffix}.txt");
     let (_v2_dir, upload_v2) = path_upload(&payload_v2, b"second version");
