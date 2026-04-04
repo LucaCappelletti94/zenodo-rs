@@ -1392,6 +1392,221 @@ async fn ensure_editable_draft_reuses_unpublished_deposition() {
 }
 
 #[tokio::test]
+async fn ensure_editable_draft_resolves_latest_published_deposition_before_newversion() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/71",
+        StatusCode::OK,
+        json!({
+            "id": 71,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/71"),
+                "latest": server.url("deposit/depositions/72")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/72",
+        StatusCode::OK,
+        json!({
+            "id": 72,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/72"),
+                "latest": server.url("deposit/depositions/72")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/72/actions/newversion",
+        StatusCode::CREATED,
+        json!({
+            "id": 72,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "latest_draft": server.url("deposit/depositions/73")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/73",
+        StatusCode::OK,
+        json!({
+            "id": 73,
+            "submitted": false,
+            "state": "inprogress",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/73"),
+                "bucket": server.url("files/bucket-73")
+            }
+        }),
+    );
+
+    let draft = client
+        .ensure_editable_draft(DepositionId(71))
+        .await
+        .expect("ensure latest draft from stale published deposition");
+
+    assert_eq!(draft.id, DepositionId(73));
+
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/deposit/depositions/71",
+            "/api/deposit/depositions/72",
+            "/api/deposit/depositions/72/actions/newversion",
+            "/api/deposit/depositions/73",
+        ]
+    );
+}
+
+#[tokio::test]
+async fn ensure_editable_draft_falls_back_to_latest_record_when_deposition_has_no_latest_link() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/81",
+        StatusCode::OK,
+        json!({
+            "id": 81,
+            "submitted": true,
+            "state": "done",
+            "record_id": 81,
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/81")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/81",
+        StatusCode::OK,
+        json!({
+            "id": 81,
+            "recid": 81,
+            "metadata": { "title": "Record 81" },
+            "files": [],
+            "links": {
+                "self": server.url("records/81"),
+                "latest": server.url("records/82")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/82",
+        StatusCode::OK,
+        json!({
+            "id": 82,
+            "recid": 82,
+            "metadata": { "title": "Record 82" },
+            "files": [],
+            "links": {
+                "self": server.url("records/82")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/82",
+        StatusCode::OK,
+        json!({
+            "id": 82,
+            "submitted": true,
+            "state": "done",
+            "record_id": 82,
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/82")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/82/actions/newversion",
+        StatusCode::CREATED,
+        json!({
+            "id": 82,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "latest_draft": server.url("deposit/depositions/83")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/83",
+        StatusCode::OK,
+        json!({
+            "id": 83,
+            "submitted": false,
+            "state": "inprogress",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/83"),
+                "bucket": server.url("files/bucket-83")
+            }
+        }),
+    );
+
+    let draft = client
+        .ensure_editable_draft(DepositionId(81))
+        .await
+        .expect("ensure latest draft from record fallback");
+
+    assert_eq!(draft.id, DepositionId(83));
+
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/deposit/depositions/81",
+            "/api/records/81",
+            "/api/records/82",
+            "/api/deposit/depositions/82",
+            "/api/deposit/depositions/82/actions/newversion",
+            "/api/deposit/depositions/83",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn http_errors_surface_through_public_api() {
     let server = MockZenodoServer::start().await;
     let client = server.client();

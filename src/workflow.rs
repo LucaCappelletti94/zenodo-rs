@@ -178,8 +178,9 @@ impl ZenodoClient {
 
     /// Returns an editable draft for the given deposition ID.
     ///
-    /// Unpublished depositions are reused directly. Published depositions
-    /// trigger `newversion` and then follow `latest_draft`.
+    /// Unpublished depositions are reused directly. Published depositions are
+    /// first resolved to the latest published version and then trigger
+    /// `newversion`, after which the helper follows `latest_draft`.
     ///
     /// # Examples
     ///
@@ -204,7 +205,10 @@ impl ZenodoClient {
         match editable_draft_action(&deposition) {
             EditableDraftAction::ReuseExisting => Ok(deposition),
             EditableDraftAction::CreateNewVersion => {
-                let latest = self.new_version(id).await?;
+                let latest_published = self
+                    .latest_published_deposition_for_new_version(deposition)
+                    .await?;
+                let latest = self.new_version(latest_published.id).await?;
                 let latest_draft = latest
                     .latest_draft_url()
                     .cloned()
@@ -372,6 +376,51 @@ impl ZenodoClient {
             deposition: published,
             record,
         })
+    }
+
+    async fn latest_published_deposition_for_new_version(
+        &self,
+        deposition: Deposition,
+    ) -> Result<Deposition, ZenodoError> {
+        if !deposition.is_published() {
+            return Ok(deposition);
+        }
+
+        if let Some(latest_url) = deposition.links.latest.as_ref() {
+            let self_url = deposition.links.self_.as_ref();
+            if self_url != Some(latest_url) {
+                return self
+                    .resolve_latest_published_deposition_url(latest_url)
+                    .await;
+            }
+        }
+
+        if let Some(record_id) = deposition.record_id {
+            let latest_record = self.resolve_latest_version(record_id).await?;
+            if latest_record.id.0 != deposition.id.0 {
+                return self.get_deposition(DepositionId(latest_record.id.0)).await;
+            }
+        }
+
+        Ok(deposition)
+    }
+
+    async fn resolve_latest_published_deposition_url(
+        &self,
+        url: &Url,
+    ) -> Result<Deposition, ZenodoError> {
+        if url.path().contains("/api/deposit/depositions/") {
+            return self.get_deposition_by_url(url).await;
+        }
+
+        if url.path().contains("/api/records/") {
+            let record = self.get_record_by_url(url).await?;
+            return self.get_deposition(DepositionId(record.id.0)).await;
+        }
+
+        Err(ZenodoError::InvalidState(format!(
+            "unsupported latest published deposition link: {url}"
+        )))
     }
 
     async fn upload_spec(
