@@ -1,4 +1,16 @@
 //! Higher-level workflow helpers that encode Zenodo deposition lifecycles.
+//!
+//! Use this module when you want the crate to encode Zenodo's safe-path state
+//! transitions for you.
+//!
+//! The main helpers are:
+//!
+//! - [`ZenodoClient::ensure_editable_draft`] to reuse a draft or create a new version
+//! - [`ZenodoClient::enter_edit_mode`] to reopen the current published deposition
+//! - [`ZenodoClient::reconcile_files`] to apply a [`FileReplacePolicy`]
+//! - [`ZenodoClient::publish_dataset_with_policy`] for end-to-end publish flows
+//!
+//! If you want to call raw endpoints one by one, use [`crate::client`] instead.
 
 use std::collections::BTreeSet;
 use std::time::Instant;

@@ -1,4 +1,14 @@
 //! Download helpers for record files and archives.
+//!
+//! Use this module when you already know which published record or DOI you want
+//! to consume and need either:
+//!
+//! - a streaming response via [`DownloadStream`]
+//! - a resolved local download via [`ResolvedDownload`]
+//! - high-level selector-based downloads via [`crate::records::ArtifactSelector`]
+//!
+//! For record lookup and DOI resolution before downloading, see
+//! [`crate::records`].
 
 use std::path::Path;
 use std::pin::Pin;

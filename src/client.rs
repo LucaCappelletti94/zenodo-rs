@@ -1,4 +1,16 @@
 //! Low-level typed Zenodo client operations.
+//!
+//! Use this module when you want direct access to Zenodo's deposition and
+//! record endpoints without the higher-level safety logic from [`crate::workflow`].
+//!
+//! The main entrypoints here are:
+//!
+//! - [`ZenodoClient`] for authenticated API access
+//! - [`ZenodoClientBuilder`] for endpoint, timeout, and polling configuration
+//! - [`Auth`] for token loading from strings or environment variables
+//!
+//! If you want the crate to decide between draft reuse and `newversion`, or to
+//! run a full publish workflow, prefer [`crate::workflow`].
 
 use std::io::{ErrorKind, Read};
 use std::path::Path;

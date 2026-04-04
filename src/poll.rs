@@ -16,7 +16,7 @@ pub struct PollOptions {
 impl Default for PollOptions {
     fn default() -> Self {
         Self {
-            max_wait: Duration::from_mins(1),
+            max_wait: Duration::from_secs(60),
             initial_delay: Duration::from_millis(500),
             max_delay: Duration::from_secs(5),
         }

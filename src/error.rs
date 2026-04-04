@@ -1,4 +1,9 @@
 //! Error types and HTTP error decoding for Zenodo responses.
+//!
+//! [`ZenodoError`] intentionally covers both structured Zenodo API failures and
+//! lower-level transport or local I/O problems so callers can decide whether an
+//! operation should be retried, surfaced to users, or treated as a workflow
+//! invariant violation.
 
 use reqwest::{Response, StatusCode};
 use serde::{Deserialize, Serialize};

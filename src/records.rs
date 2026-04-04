@@ -1,4 +1,13 @@
 //! Published-record search, retrieval, and latest-version helpers.
+//!
+//! Use this module when you want to work with Zenodo's public record surface:
+//!
+//! - [`RecordQuery`] and [`RecordQueryBuilder`] for search
+//! - [`RecordSelector`] for choosing a record by ID or DOI
+//! - [`ArtifactSelector`] for naming a downloadable file or archive
+//!
+//! Most consumers start here for DOI lookup, latest-version resolution, and
+//! artifact-oriented read flows.
 
 use serde::Deserialize;
 use url::Url;

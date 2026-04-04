@@ -1,4 +1,16 @@
 //! Typed metadata models for deposit updates and published records.
+//!
+//! This module contains the typed request and response shapes that matter most
+//! for Zenodo publishing and retrieval.
+//!
+//! The most important entrypoints are:
+//!
+//! - [`DepositMetadataUpdate::builder`] for draft metadata updates
+//! - [`Creator::builder`] and the other small builders for nested metadata
+//! - [`RecordMetadata`] for typed fields on published records
+//!
+//! Unknown Zenodo fields are still preserved through flattened `extra` maps so
+//! the crate remains forward compatible with mild schema drift.
 
 use std::collections::BTreeMap;
 

@@ -10,6 +10,14 @@ Async Rust client for core [Zenodo](https://zenodo.org/) workflows.
 
 It covers deposition create/update/publish flows, safe draft reuse versus `newversion`, published-record lookup, latest-version resolution, and downloads behind a small typed API for automation and CI jobs built on top of the [Zenodo REST API](https://developers.zenodo.org/).
 
+## Start Here
+
+- Use [`ZenodoClient`](https://docs.rs/zenodo-rs/latest/zenodo_rs/client/struct.ZenodoClient.html) for the main entrypoint.
+- Use [`workflow`](https://docs.rs/zenodo-rs/latest/zenodo_rs/workflow/index.html) for safe draft, publish, edit, and version helpers.
+- Use [`records`](https://docs.rs/zenodo-rs/latest/zenodo_rs/records/index.html) for published-record lookup, DOI resolution, and search.
+- Use [`downloads`](https://docs.rs/zenodo-rs/latest/zenodo_rs/downloads/index.html) for file and archive downloads.
+- Use [`DepositMetadataUpdate`](https://docs.rs/zenodo-rs/latest/zenodo_rs/metadata/struct.DepositMetadataUpdate.html) and [`UploadSpec`](https://docs.rs/zenodo-rs/latest/zenodo_rs/upload/struct.UploadSpec.html) to describe what you want to publish.
+
 ## Install
 
 ```toml
@@ -18,9 +26,12 @@ zenodo-rs = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
-Add the optional `checksums` feature if you want download-to-path helpers to validate Zenodo `md5:` checksums.
+Optional features:
 
-## Example
+- `checksums`: validate Zenodo `md5:` checksums when downloading to a path
+- `native-tls`: use `reqwest` with `native-tls` instead of the default `rustls-tls`
+
+## Read Example
 
 ```rust,no_run
 use zenodo_rs::ZenodoClient;
@@ -35,6 +46,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Publish Example
+
+```rust,no_run
+use zenodo_rs::{
+    AccessRight, Auth, DepositMetadataUpdate, DepositionId, FileReplacePolicy, UploadSpec,
+    UploadType, ZenodoClient,
+};
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ZenodoClient::new(Auth::new("token"))?;
+    let metadata = DepositMetadataUpdate::builder()
+        .title("Example dataset")
+        .upload_type(UploadType::Dataset)
+        .description_html("<p>Example upload</p>")
+        .creator_named("Doe, Jane")
+        .access_right(AccessRight::Open)
+        .build()?;
+
+    let published = client
+        .publish_dataset_with_policy(
+            DepositionId(42),
+            &metadata,
+            FileReplacePolicy::ReplaceAll,
+            vec![UploadSpec::from_path("artifact.tar.gz")?],
+        )
+        .await?;
+    let _ = published.record.id;
+
+    Ok(())
+}
+```
+
+## Authentication
+
+- `ZENODO_TOKEN` is the standard env var for the production service at [zenodo.org](https://zenodo.org/).
+- `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent for [sandbox.zenodo.org](https://sandbox.zenodo.org/).
+- Write flows usually need `deposit:write` and `deposit:actions`.
+
 ## Notes
 
-`ZENODO_TOKEN` is the standard env var for the production service at [zenodo.org](https://zenodo.org/), and `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent for [sandbox.zenodo.org](https://sandbox.zenodo.org/). Write flows usually need `deposit:write` and `deposit:actions`; see the [Zenodo developer docs](https://developers.zenodo.org/). Public download APIs use Zenodo IDs and selectors rather than raw URLs, and uploads require a known content length.
+Public download APIs use Zenodo IDs and selectors rather than raw URLs, and uploads require a known content length. For Zenodo-side behavior and token scopes, see the [Zenodo developer docs](https://developers.zenodo.org/).

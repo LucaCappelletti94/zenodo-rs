@@ -1,4 +1,15 @@
 //! Core data models for depositions, records, and files.
+//!
+//! These types are primarily returned by the client rather than constructed by
+//! callers. They represent the stable, typed parts of Zenodo payloads while
+//! still preserving unknown fields for forward compatibility.
+//!
+//! In practice, most callers touch:
+//!
+//! - [`Deposition`] for draft and publish state
+//! - [`Record`] for published metadata and links
+//! - [`RecordFile`] for downloadable files
+//! - [`ArtifactInfo`] and [`PublishedRecord`] for higher-level summaries
 
 use std::collections::BTreeMap;
 

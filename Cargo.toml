@@ -2,12 +2,16 @@
 name = "zenodo-rs"
 version = "0.1.1"
 edition = "2021"
+rust-version = "1.86"
 description = "Rust client for Zenodo deposition workflows, record retrieval, and artifact downloads."
 license = "MIT"
 repository = "https://github.com/LucaCappelletti94/zenodo-rs"
 readme = "README.md"
 keywords = ["zenodo", "doi", "publishing", "downloads"]
 categories = ["api-bindings", "science"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = ["rustls-tls"]
