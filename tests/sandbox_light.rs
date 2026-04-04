@@ -9,7 +9,7 @@ mod support;
 
 use std::io::Cursor;
 
-use zenodo_rs::{ArtifactSelector, FileReplacePolicy, UploadSpec, ZenodoError};
+use zenodo_rs::{ArtifactSelector, DepositState, FileReplacePolicy, UploadSpec, ZenodoError};
 
 use crate::support::{
     download_path, live_client, metadata, path_upload, reader_upload, unique_suffix,
@@ -138,8 +138,8 @@ async fn daily_sandbox_smoke_covers_full_live_api_surface() {
         .await
         .expect("enter edit mode on published deposition");
     assert!(
-        !editable.is_published(),
-        "edit mode should expose an editable draft state"
+        editable.status.state == DepositState::InProgress,
+        "edit mode should expose an editable deposition state"
     );
     let discarded = client
         .discard(editable.id)
