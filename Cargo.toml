@@ -1,6 +1,6 @@
 [package]
 name = "zenodo-rs"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 rust-version = "1.86"
 description = "Rust client for Zenodo deposition workflows, record retrieval, and artifact downloads."
@@ -17,7 +17,7 @@ all-features = true
 default = ["rustls-tls"]
 checksums = ["dep:md-5", "dep:hex"]
 native-tls = ["reqwest/native-tls"]
-rustls-tls = ["reqwest/rustls-tls"]
+rustls-tls = ["reqwest/rustls"]
 
 [dependencies]
 bytes = "1.10"
@@ -25,10 +25,10 @@ chrono = { version = "0.4", features = ["serde"] }
 futures-core = "0.3"
 futures-util = "0.3"
 hex = { version = "0.4", optional = true }
-md-5 = { version = "0.10", optional = true }
+md-5 = { version = "0.11", optional = true }
 mime = "0.3"
 mime_guess = "2.0"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream"] }
+reqwest = { version = "0.13.2", default-features = false, features = ["json", "query", "stream"] }
 secrecy = "0.10"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
