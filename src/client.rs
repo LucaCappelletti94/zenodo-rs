@@ -579,9 +579,19 @@ impl ZenodoClient {
         filename: &str,
         path: &Path,
     ) -> Result<BucketObject, ZenodoError> {
+        self.upload_path_with_content_type(bucket, filename, path, mime::APPLICATION_OCTET_STREAM)
+            .await
+    }
+
+    pub(crate) async fn upload_path_with_content_type(
+        &self,
+        bucket: &BucketUrl,
+        filename: &str,
+        path: &Path,
+        content_type: mime::Mime,
+    ) -> Result<BucketObject, ZenodoError> {
         let file = File::open(path).await?;
         let length = file.metadata().await?.len();
-        let content_type = mime_guess::from_path(path).first_or_octet_stream();
         let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
 
         self.execute_json(

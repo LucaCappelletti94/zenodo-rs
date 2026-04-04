@@ -40,7 +40,7 @@ async fn daily_sandbox_smoke_covers_light_draft_and_read_apis() {
         unique_a.clone(),
         std::io::Cursor::new(b"draft smoke v2".to_vec()),
         14,
-        mime::TEXT_PLAIN,
+        mime::APPLICATION_OCTET_STREAM,
     );
     let upload_b = reader_upload(&unique_b, b"draft smoke extra");
     let (_stable_dir, stable_upload) = path_upload(stable_filename, b"stable daily state");

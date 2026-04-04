@@ -57,7 +57,11 @@ pub struct UploadSpec {
 }
 
 impl UploadSpec {
-    /// Builds an upload spec from a local path and MIME-type guess.
+    /// Builds an upload spec from a local path.
+    ///
+    /// Zenodo bucket uploads commonly expect `application/octet-stream`, so
+    /// that is the safe default used here. Callers can still override
+    /// [`Self::content_type`] explicitly before upload when needed.
     ///
     /// # Examples
     ///
@@ -86,7 +90,7 @@ impl UploadSpec {
             })?;
 
         Ok(Self {
-            content_type: mime_guess::from_path(&path).first_or_octet_stream(),
+            content_type: mime::APPLICATION_OCTET_STREAM,
             filename,
             source: UploadSource::Path(path),
         })
@@ -138,10 +142,10 @@ mod tests {
     use super::{UploadSource, UploadSpec};
 
     #[test]
-    fn path_upload_uses_filename_and_mime_guess() {
+    fn path_upload_defaults_to_octet_stream() {
         let spec = UploadSpec::from_path(PathBuf::from("/tmp/archive.tar.gz")).unwrap();
         assert_eq!(spec.filename, "archive.tar.gz");
-        assert_eq!(spec.content_type.as_ref(), "application/gzip");
+        assert_eq!(spec.content_type, mime::APPLICATION_OCTET_STREAM);
     }
 
     #[test]

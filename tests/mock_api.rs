@@ -268,7 +268,7 @@ async fn upload_path_and_reader_send_known_content_length() {
     );
     assert_eq!(
         requests[0].headers.get("content-type").map(String::as_str),
-        Some("text/plain")
+        Some("application/octet-stream")
     );
     assert_eq!(requests[1].body, b"12345");
     assert_eq!(

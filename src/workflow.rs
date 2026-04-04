@@ -380,7 +380,10 @@ impl ZenodoClient {
         spec: UploadSpec,
     ) -> Result<crate::model::BucketObject, ZenodoError> {
         match spec.source {
-            UploadSource::Path(path) => self.upload_path(bucket, &spec.filename, &path).await,
+            UploadSource::Path(path) => {
+                self.upload_path_with_content_type(bucket, &spec.filename, &path, spec.content_type)
+                    .await
+            }
             UploadSource::Reader {
                 reader,
                 content_length,
