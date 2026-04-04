@@ -70,6 +70,8 @@ string_enum!(
         /// Draft work is still in progress.
         #[default]
         InProgress => "inprogress",
+        /// Unpublished draft state returned by Zenodo's live API and examples.
+        Unsubmitted => "unsubmitted",
         /// Processing completed successfully.
         Done => "done",
         /// Processing failed.
@@ -192,6 +194,15 @@ impl Deposition {
     #[must_use]
     pub fn is_published(&self) -> bool {
         self.status.submitted
+    }
+
+    /// Returns `true` when Zenodo reports that metadata edits are allowed.
+    #[must_use]
+    pub fn allows_metadata_edits(&self) -> bool {
+        matches!(
+            self.status.state,
+            DepositState::InProgress | DepositState::Unsubmitted
+        )
     }
 
     /// Returns the `latest_draft` link, when present.
@@ -641,10 +652,16 @@ mod tests {
     fn model_string_enums_preserve_unknown_values() {
         let state: DepositState = serde_json::from_value(json!("queued")).unwrap();
         let status: RecordPublicationStatus = serde_json::from_value(json!("embargoed")).unwrap();
+        let unsubmitted: DepositState = serde_json::from_value(json!("unsubmitted")).unwrap();
 
         assert_eq!(serde_json::to_value(&state).unwrap(), json!("queued"));
         assert_eq!(serde_json::to_value(&status).unwrap(), json!("embargoed"));
+        assert_eq!(
+            serde_json::to_value(&unsubmitted).unwrap(),
+            json!("unsubmitted")
+        );
         assert!(matches!(state, DepositState::Unknown(value) if value == "queued"));
+        assert_eq!(unsubmitted, DepositState::Unsubmitted);
         assert!(matches!(status, RecordPublicationStatus::Unknown(value) if value == "embargoed"));
     }
 
@@ -795,5 +812,21 @@ mod tests {
         assert!(matches!(deposition.status.state, DepositState::Unknown(_)));
         assert!(record.latest_url().is_none());
         assert!(record.archive_url().is_none());
+    }
+
+    #[test]
+    fn deposition_helpers_treat_unsubmitted_as_editable() {
+        let deposition: Deposition = serde_json::from_value(serde_json::json!({
+            "id": 11,
+            "submitted": false,
+            "state": "unsubmitted",
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }))
+        .unwrap();
+
+        assert_eq!(deposition.status.state, DepositState::Unsubmitted);
+        assert!(deposition.allows_metadata_edits());
     }
 }

@@ -22,7 +22,7 @@ use crate::client::ZenodoClient;
 use crate::error::ZenodoError;
 use crate::ids::DepositionId;
 use crate::metadata::DepositMetadataUpdate;
-use crate::model::{DepositState, Deposition, PublishedRecord};
+use crate::model::{Deposition, PublishedRecord};
 use crate::upload::{FileReplacePolicy, UploadSource, UploadSpec};
 
 /// Action needed to obtain an editable draft.
@@ -67,7 +67,7 @@ pub fn editable_draft_action(deposition: &Deposition) -> EditableDraftAction {
 }
 
 fn deposition_allows_metadata_edits(deposition: &Deposition) -> bool {
-    matches!(deposition.status.state, DepositState::InProgress)
+    deposition.allows_metadata_edits()
 }
 
 pub(crate) fn file_ids_to_delete(

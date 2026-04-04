@@ -162,7 +162,7 @@ pub async fn wait_for_draft_deposition(client: &ZenodoClient, id: DepositionId) 
 
     loop {
         let last_error = match client.get_deposition(id).await {
-            Ok(deposition) if deposition.status.state == zenodo_rs::DepositState::InProgress => {
+            Ok(deposition) if !deposition.is_published() && deposition.allows_metadata_edits() => {
                 return deposition;
             }
             Ok(deposition) => format!(
