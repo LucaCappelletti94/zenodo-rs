@@ -9,12 +9,13 @@
 //! - [`ZenodoClient::enter_edit_mode`] to reopen the current published deposition
 //! - [`ZenodoClient::reconcile_files`] to apply a [`FileReplacePolicy`]
 //! - [`ZenodoClient::publish_dataset_with_policy`] for end-to-end publish flows
+//! - [`ZenodoClient::create_and_publish_dataset_with_policy`] to create a fresh deposition and publish it
 //!
 //! If you want to call raw endpoints one by one, use [`crate::client`] instead.
 
-use std::collections::BTreeSet;
 use std::time::Instant;
 
+use client_uploader_traits::collect_upload_filenames;
 use tokio::time::sleep;
 use url::Url;
 
@@ -73,7 +74,7 @@ fn deposition_allows_metadata_edits(deposition: &Deposition) -> bool {
 pub(crate) fn file_ids_to_delete(
     policy: FileReplacePolicy,
     deposition: &Deposition,
-    uploaded_filenames: &BTreeSet<String>,
+    uploaded_filenames: &std::collections::BTreeSet<String>,
 ) -> Vec<crate::ids::DepositionFileId> {
     match policy {
         FileReplacePolicy::ReplaceAll => deposition
@@ -91,29 +92,10 @@ pub(crate) fn file_ids_to_delete(
     }
 }
 
-fn collect_uploaded_filenames(files: &[UploadSpec]) -> Result<BTreeSet<String>, ZenodoError> {
-    let mut uploaded_filenames = BTreeSet::new();
-
-    for spec in files {
-        if spec.filename.is_empty() {
-            return Err(ZenodoError::InvalidState(
-                "upload filename cannot be empty".to_owned(),
-            ));
-        }
-        if !uploaded_filenames.insert(spec.filename.clone()) {
-            return Err(ZenodoError::DuplicateUploadFilename {
-                filename: spec.filename.clone(),
-            });
-        }
-    }
-
-    Ok(uploaded_filenames)
-}
-
 fn validate_reconcile_inputs(
     policy: FileReplacePolicy,
     deposition: &Deposition,
-    uploaded_filenames: &BTreeSet<String>,
+    uploaded_filenames: &std::collections::BTreeSet<String>,
 ) -> Result<(), ZenodoError> {
     if policy != FileReplacePolicy::KeepExistingAndAdd {
         return Ok(());
@@ -302,7 +284,8 @@ impl ZenodoClient {
             .bucket_url()
             .cloned()
             .ok_or(ZenodoError::MissingLink("bucket"))?;
-        let uploaded_filenames = collect_uploaded_filenames(&files)?;
+        let uploaded_filenames =
+            collect_upload_filenames(files.iter()).map_err(ZenodoError::from)?;
         validate_reconcile_inputs(policy, &refreshed, &uploaded_filenames)?;
 
         for file_id in file_ids_to_delete(policy, &refreshed, &uploaded_filenames) {
@@ -393,6 +376,74 @@ impl ZenodoClient {
             deposition: published,
             record,
         })
+    }
+
+    /// Creates a fresh deposition and runs the full publish workflow.
+    ///
+    /// This is the ergonomic entrypoint for "publish a new dataset now"
+    /// automation that does not already have a deposition ID.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use zenodo_rs::{
+    ///     AccessRight, Auth, DepositMetadataUpdate, UploadSpec, UploadType, ZenodoClient,
+    /// };
+    ///
+    /// #[tokio::main]
+    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    ///     let client = ZenodoClient::new(Auth::new("token"))?;
+    ///     let metadata = DepositMetadataUpdate::builder()
+    ///         .title("Example dataset")
+    ///         .upload_type(UploadType::Dataset)
+    ///         .description_html("<p>Example upload</p>")
+    ///         .creator_named("Doe, Jane")
+    ///         .access_right(AccessRight::Open)
+    ///         .build()?;
+    ///
+    ///     let published = client
+    ///         .create_and_publish_dataset(
+    ///             &metadata,
+    ///             vec![UploadSpec::from_path_as(
+    ///                 "target/release.tar.gz",
+    ///                 "archive.tar.gz",
+    ///             )?],
+    ///         )
+    ///         .await?;
+    ///     let _ = published.record.id;
+    ///     Ok(())
+    /// }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deposition creation fails or if any later metadata
+    /// update, file upload, publish step, or final record lookup fails.
+    pub async fn create_and_publish_dataset(
+        &self,
+        metadata: &DepositMetadataUpdate,
+        files: impl IntoIterator<Item = UploadSpec>,
+    ) -> Result<PublishedRecord, ZenodoError> {
+        self.create_and_publish_dataset_with_policy(metadata, FileReplacePolicy::ReplaceAll, files)
+            .await
+    }
+
+    /// Creates a fresh deposition and runs the full publish workflow with a file policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if deposition creation fails or if any later metadata
+    /// update, file upload, publish step, duplicate/conflicting filename
+    /// validation, or final record lookup fails.
+    pub async fn create_and_publish_dataset_with_policy(
+        &self,
+        metadata: &DepositMetadataUpdate,
+        policy: FileReplacePolicy,
+        files: impl IntoIterator<Item = UploadSpec>,
+    ) -> Result<PublishedRecord, ZenodoError> {
+        let draft = self.create_deposition().await?;
+        self.publish_dataset_with_policy(draft.id, metadata, policy, files)
+            .await
     }
 
     async fn latest_published_deposition_for_new_version(
@@ -545,9 +596,11 @@ fn retryable_error(error: &ZenodoError) -> bool {
 mod tests {
     use std::time::{Duration, Instant};
 
+    use client_uploader_traits::collect_upload_filenames;
+
     use super::{
-        collect_uploaded_filenames, editable_draft_action, file_ids_to_delete, retryable_error,
-        validate_reconcile_inputs, EditableDraftAction,
+        editable_draft_action, file_ids_to_delete, retryable_error, validate_reconcile_inputs,
+        EditableDraftAction,
     };
     use crate::client::{Auth, ZenodoClient};
     use crate::error::ZenodoError;
@@ -668,7 +721,7 @@ mod tests {
 
     #[test]
     fn duplicate_uploaded_filenames_are_rejected() {
-        let files = vec![
+        let files = [
             UploadSpec::from_reader(
                 "artifact.bin",
                 std::io::Cursor::new(vec![1_u8]),
@@ -683,7 +736,9 @@ mod tests {
             ),
         ];
 
-        let error = collect_uploaded_filenames(&files).unwrap_err();
+        let error = collect_upload_filenames(files.iter())
+            .map_err(ZenodoError::from)
+            .unwrap_err();
         assert!(matches!(
             error,
             ZenodoError::DuplicateUploadFilename { filename } if filename == "artifact.bin"
@@ -717,14 +772,16 @@ mod tests {
 
     #[test]
     fn empty_uploaded_filenames_are_rejected() {
-        let files = vec![UploadSpec::from_reader(
+        let files = [UploadSpec::from_reader(
             "",
             std::io::Cursor::new(vec![1_u8]),
             1,
             mime::APPLICATION_OCTET_STREAM,
         )];
 
-        let error = collect_uploaded_filenames(&files).unwrap_err();
+        let error = collect_upload_filenames(files.iter())
+            .map_err(ZenodoError::from)
+            .unwrap_err();
         assert!(
             matches!(error, ZenodoError::InvalidState(message) if message == "upload filename cannot be empty")
         );

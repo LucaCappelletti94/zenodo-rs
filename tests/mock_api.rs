@@ -1311,6 +1311,110 @@ async fn publish_dataset_reports_missing_record_id_after_publish() {
 }
 
 #[tokio::test]
+async fn create_and_publish_dataset_creates_a_fresh_deposition_first() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let dir = tempdir().expect("tempdir");
+    let artifact_path = dir.path().join("local-name.bin");
+    std::fs::write(&artifact_path, b"data").expect("write upload file");
+
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions",
+        StatusCode::CREATED,
+        deposition_json(&server, 72, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/72",
+        StatusCode::OK,
+        deposition_json(&server, 72, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/deposit/depositions/72",
+        StatusCode::OK,
+        deposition_json(&server, 72, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/72",
+        StatusCode::OK,
+        deposition_json(&server, 72, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-72/archive-name.bin",
+        StatusCode::OK,
+        json!({ "key": "archive-name.bin", "size": 4 }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/72/actions/publish",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 72,
+            "submitted": true,
+            "state": "done",
+            "record_id": 82,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/72",
+        StatusCode::OK,
+        json!({
+            "id": 72,
+            "submitted": true,
+            "state": "done",
+            "record_id": 82,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/82",
+        StatusCode::OK,
+        record_json(&server, 82),
+    );
+
+    let files = UploadSpec::from_named_paths([("archive-name.bin", artifact_path.as_path())])
+        .expect("manifest upload specs");
+
+    let published = client
+        .create_and_publish_dataset(&metadata_update(), files)
+        .await
+        .expect("create and publish dataset");
+
+    assert_eq!(published.deposition.id, DepositionId(72));
+    assert_eq!(published.record.id, RecordId(82));
+
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/deposit/depositions",
+            "/api/deposit/depositions/72",
+            "/api/deposit/depositions/72",
+            "/api/deposit/depositions/72",
+            "/api/files/bucket-72/archive-name.bin",
+            "/api/deposit/depositions/72/actions/publish",
+            "/api/deposit/depositions/72",
+            "/api/records/82"
+        ]
+    );
+}
+
+#[tokio::test]
 async fn publish_dataset_with_policy_uses_upsert_by_filename() {
     let server = MockZenodoServer::start().await;
     let client = server.client();

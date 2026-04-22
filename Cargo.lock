@@ -181,6 +181,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "client-uploader-traits"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93e798ac3dcc76ddca3e24d91a43f27e4db744074e90b6130a1ea0c1491a2f5d"
+dependencies = [
+ "url",
+]
+
+[[package]]
 name = "cmake"
 version = "0.1.58"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2359,6 +2368,7 @@ dependencies = [
  "axum",
  "bytes",
  "chrono",
+ "client-uploader-traits",
  "futures-core",
  "futures-util",
  "hex",

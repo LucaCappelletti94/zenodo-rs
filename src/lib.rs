@@ -25,6 +25,7 @@
 )]
 
 pub mod client;
+mod client_uploader_traits_impl;
 pub mod downloads;
 pub mod endpoint;
 pub mod error;

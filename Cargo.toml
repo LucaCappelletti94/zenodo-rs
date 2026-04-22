@@ -21,6 +21,7 @@ rustls-tls = ["reqwest/rustls"]
 
 [dependencies]
 bytes = "1.11.1"
+client-uploader-traits = "0.1.0"
 chrono = { version = "0.4.44", features = ["serde"] }
 futures-core = "0.3.32"
 futures-util = "0.3.32"

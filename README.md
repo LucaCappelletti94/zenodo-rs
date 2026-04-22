@@ -50,8 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ```rust,no_run
 use zenodo_rs::{
-    AccessRight, Auth, DepositMetadataUpdate, DepositionId, FileReplacePolicy, UploadSpec,
-    UploadType, ZenodoClient,
+    AccessRight, Auth, DepositMetadataUpdate, UploadSpec, UploadType, ZenodoClient,
 };
 
 #[tokio::main]
@@ -64,14 +63,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .creator_named("Doe, Jane")
         .access_right(AccessRight::Open)
         .build()?;
+    let files = UploadSpec::from_named_paths([("artifact.tar.gz", "target/release.tar.gz")])?;
 
     let published = client
-        .publish_dataset_with_policy(
-            DepositionId(42),
-            &metadata,
-            FileReplacePolicy::ReplaceAll,
-            vec![UploadSpec::from_path("artifact.tar.gz")?],
-        )
+        .create_and_publish_dataset(&metadata, files)
         .await?;
     let _ = published.record.id;
 

@@ -5,6 +5,7 @@
 //! operation should be retried, surfaced to users, or treated as a workflow
 //! invariant violation.
 
+use client_uploader_traits::UploadNameValidationError;
 use reqwest::{Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -122,6 +123,19 @@ pub enum ZenodoError {
         /// Label for the operation that timed out.
         &'static str,
     ),
+}
+
+impl From<UploadNameValidationError> for ZenodoError {
+    fn from(value: UploadNameValidationError) -> Self {
+        match value {
+            UploadNameValidationError::EmptyFilename => {
+                Self::InvalidState("upload filename cannot be empty".to_owned())
+            }
+            UploadNameValidationError::DuplicateFilename { filename } => {
+                Self::DuplicateUploadFilename { filename }
+            }
+        }
+    }
 }
 
 impl ZenodoError {
@@ -258,6 +272,8 @@ fn trimmed_body(body: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use client_uploader_traits::UploadNameValidationError;
+
     use super::{decode_http_error, parse_field_errors, parse_json_error, trimmed_body};
     use reqwest::StatusCode;
     use serde_json::json;
@@ -434,6 +450,23 @@ mod tests {
     fn field_error_parser_ignores_unknown_array_items() {
         let parsed = parse_field_errors(&json!([42, true, null])).unwrap();
         assert!(parsed.is_empty());
+    }
+
+    #[test]
+    fn upload_name_validation_errors_convert_into_zenodo_errors() {
+        let empty = super::ZenodoError::from(UploadNameValidationError::EmptyFilename);
+        assert!(matches!(
+            empty,
+            super::ZenodoError::InvalidState(message) if message == "upload filename cannot be empty"
+        ));
+
+        let duplicate = super::ZenodoError::from(UploadNameValidationError::DuplicateFilename {
+            filename: "artifact.bin".to_owned(),
+        });
+        assert!(matches!(
+            duplicate,
+            super::ZenodoError::DuplicateUploadFilename { filename } if filename == "artifact.bin"
+        ));
     }
 
     #[tokio::test]
