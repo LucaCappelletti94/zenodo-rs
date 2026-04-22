@@ -12,6 +12,12 @@
 
 mod mock_support;
 
+use client_uploader_traits::{
+    CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource,
+    DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource,
+    ResolveLatestPublicResourceByDoi, SearchPublicResources, UpdatePublication,
+    UpdatePublicationRequest,
+};
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::str::FromStr;
@@ -1412,6 +1418,397 @@ async fn create_and_publish_dataset_creates_a_fresh_deposition_first() {
             "/api/records/82"
         ]
     );
+}
+
+#[tokio::test]
+async fn repository_client_trait_methods_delegate_to_record_apis() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("artifact.bin");
+    let doi = Doi::new("10.5281/zenodo.700").expect("doi");
+
+    let record_700 = json!({
+        "id": 700,
+        "recid": 700,
+        "doi": "10.5281/zenodo.700",
+        "metadata": { "title": "Trait record" },
+        "files": [{
+            "id": "f-700",
+            "key": "artifact.bin",
+            "size": 5,
+            "checksum": "md5:5d41402abc4b2a76b9719d911017c592",
+            "links": {
+                "self": server.url("download/700/artifact.bin")
+            }
+        }],
+        "links": {
+            "latest": server.url("records/701")
+        }
+    });
+    let record_701 = json!({
+        "id": 701,
+        "recid": 701,
+        "doi": "10.5281/zenodo.701",
+        "metadata": { "title": "Latest trait record" },
+        "files": [{
+            "id": "f-701",
+            "key": "artifact.bin",
+            "size": 6,
+            "links": {
+                "self": server.url("download/701/artifact.bin")
+            }
+        }],
+        "links": {}
+    });
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/700",
+        StatusCode::OK,
+        record_700.clone(),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": { "hits": [record_700.clone()], "total": 1 },
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/700",
+        StatusCode::OK,
+        record_700.clone(),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/700",
+        StatusCode::OK,
+        record_700.clone(),
+    );
+    server.enqueue(
+        Method::GET,
+        "/api/download/700/artifact.bin",
+        QueuedResponse::bytes(StatusCode::OK, vec![], b"hello".to_vec()),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": { "hits": [record_700.clone()], "total": 1 },
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/700",
+        StatusCode::OK,
+        record_700.clone(),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/701",
+        StatusCode::OK,
+        record_701.clone(),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": { "hits": [record_700], "total": 1 },
+            "links": {}
+        }),
+    );
+    server.enqueue_json(Method::GET, "/api/records/701", StatusCode::OK, record_701);
+
+    let public = <ZenodoClient as ReadPublicResource>::get_public_resource(&client, &RecordId(700))
+        .await
+        .expect("get public resource");
+    assert_eq!(public.id, RecordId(700));
+
+    let results = <ZenodoClient as SearchPublicResources>::search_public_resources(
+        &client,
+        &zenodo_rs::RecordQuery::builder()
+            .query("title:\"Trait record\"")
+            .build(),
+    )
+    .await
+    .expect("search public resources");
+    assert_eq!(results.hits.len(), 1);
+
+    let files = <ZenodoClient as ListResourceFiles>::list_resource_files(&client, &RecordId(700))
+        .await
+        .expect("list resource files");
+    assert_eq!(files.len(), 1);
+
+    let download = <ZenodoClient as DownloadNamedPublicFile>::download_named_public_file_to_path(
+        &client,
+        &RecordId(700),
+        "artifact.bin",
+        &path,
+    )
+    .await
+    .expect("download named public file");
+    assert_eq!(download.resolved_record, RecordId(700));
+    assert_eq!(std::fs::read(&path).expect("read download"), b"hello");
+
+    let by_doi = <ZenodoClient as LookupByDoi>::get_public_resource_by_doi(&client, &doi)
+        .await
+        .expect("lookup by doi");
+    assert_eq!(by_doi.id, RecordId(700));
+
+    let latest = <ZenodoClient as ResolveLatestPublicResource>::resolve_latest_public_resource(
+        &client,
+        &RecordId(700),
+    )
+    .await
+    .expect("resolve latest public resource");
+    assert_eq!(latest.id, RecordId(701));
+
+    let latest_by_doi =
+        <ZenodoClient as ResolveLatestPublicResourceByDoi>::resolve_latest_public_resource_by_doi(
+            &client, &doi,
+        )
+        .await
+        .expect("resolve latest public resource by doi");
+    assert_eq!(latest_by_doi.id, RecordId(701));
+}
+
+#[tokio::test]
+async fn repository_client_trait_methods_delegate_to_publication_apis() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let dir = tempdir().expect("tempdir");
+    let artifact_path = dir.path().join("artifact.bin");
+    std::fs::write(&artifact_path, b"data").expect("write upload file");
+
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions",
+        StatusCode::CREATED,
+        deposition_json(&server, 930, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/930",
+        StatusCode::OK,
+        deposition_json(&server, 930, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/deposit/depositions/930",
+        StatusCode::OK,
+        deposition_json(&server, 930, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/930",
+        StatusCode::OK,
+        deposition_json(&server, 930, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-930/artifact.bin",
+        StatusCode::OK,
+        json!({ "id": "bucket-930", "key": "artifact.bin", "size": 4 }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/930/actions/publish",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 930,
+            "submitted": true,
+            "state": "done",
+            "record_id": 931,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/930",
+        StatusCode::OK,
+        json!({
+            "id": 930,
+            "submitted": true,
+            "state": "done",
+            "record_id": 931,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/931",
+        StatusCode::OK,
+        record_json(&server, 931),
+    );
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/940",
+        StatusCode::OK,
+        deposition_json(&server, 940, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/deposit/depositions/940",
+        StatusCode::OK,
+        deposition_json(&server, 940, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/940",
+        StatusCode::OK,
+        deposition_json(&server, 940, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-940/artifact.bin",
+        StatusCode::OK,
+        json!({ "id": "bucket-940", "key": "artifact.bin", "size": 4 }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/940/actions/publish",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 940,
+            "submitted": true,
+            "state": "done",
+            "record_id": 941,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/940",
+        StatusCode::OK,
+        json!({
+            "id": 940,
+            "submitted": true,
+            "state": "done",
+            "record_id": 941,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/941",
+        StatusCode::OK,
+        record_json(&server, 941),
+    );
+
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions",
+        StatusCode::CREATED,
+        deposition_json(&server, 950, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/deposit/depositions/950",
+        StatusCode::OK,
+        deposition_json(&server, 950, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/deposit/depositions/950",
+        StatusCode::OK,
+        deposition_json(&server, 950, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/950",
+        StatusCode::OK,
+        deposition_json(&server, 950, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-950/artifact.bin",
+        StatusCode::OK,
+        json!({ "id": "bucket-950", "key": "artifact.bin", "size": 4 }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/950/actions/publish",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 950,
+            "submitted": true,
+            "state": "done",
+            "record_id": 951,
+            "metadata": {},
+            "files": [],
+            "links": {}
+        }),
+    );
+
+    let created = <ZenodoClient as CreatePublication>::create_publication(
+        &client,
+        CreatePublicationRequest::untargeted(
+            metadata_update(),
+            vec![UploadSpec::from_path(&artifact_path).expect("upload spec")],
+        ),
+    )
+    .await
+    .expect("create publication");
+    assert_eq!(created.record.id, RecordId(931));
+
+    let updated = <ZenodoClient as UpdatePublication>::update_publication(
+        &client,
+        UpdatePublicationRequest::new(
+            DepositionId(940),
+            metadata_update(),
+            FileReplacePolicy::ReplaceAll,
+            vec![UploadSpec::from_path(&artifact_path).expect("upload spec")],
+        ),
+    )
+    .await
+    .expect("update publication");
+    assert_eq!(updated.deposition.id, DepositionId(940));
+
+    let draft = <ZenodoClient as DraftWorkflow>::create_draft(&client, &metadata_update())
+        .await
+        .expect("create draft");
+    assert_eq!(draft.draft_id(), DepositionId(950));
+
+    let updated_draft = <ZenodoClient as DraftWorkflow>::update_draft_metadata(
+        &client,
+        &DepositionId(950),
+        &metadata_update(),
+    )
+    .await
+    .expect("update draft metadata");
+    assert_eq!(updated_draft.id, DepositionId(950));
+
+    let uploaded = <ZenodoClient as DraftWorkflow>::reconcile_draft_files(
+        &client,
+        &draft,
+        FileReplacePolicy::ReplaceAll,
+        vec![UploadSpec::from_path(&artifact_path).expect("upload spec")],
+    )
+    .await
+    .expect("reconcile draft files");
+    assert_eq!(uploaded.len(), 1);
+    assert_eq!(uploaded[0].key, "artifact.bin");
+
+    let published = <ZenodoClient as DraftWorkflow>::publish_draft(&client, &DepositionId(950))
+        .await
+        .expect("publish draft");
+    assert!(published.is_published());
 }
 
 #[tokio::test]
