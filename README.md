@@ -86,24 +86,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Enable the `indicatif` feature if you want `indicatif::ProgressBar` to work
 directly with `upload_path_with_progress`, `upload_reader_with_progress`,
 `reconcile_files_with_progress`, and `download_artifact_with_progress`.
-
-```rust
-#[cfg(feature = "indicatif")]
-{
-    use indicatif::ProgressBar;
-    use zenodo_rs::TransferProgress;
-
-    let bar = ProgressBar::new(0);
-    bar.begin(Some(5));
-    bar.advance(2);
-    assert_eq!(bar.length(), Some(5));
-    assert_eq!(bar.position(), 2);
-    bar.finish();
-}
-```
-
 Pass `bar.clone()` into the progress-aware upload and download helpers when you
 want a real terminal progress bar during transfers.
+
+The full runnable example lives in the [`progress`](https://docs.rs/zenodo-rs/latest/zenodo_rs/progress/index.html)
+module docs.
 
 ## Notes
 
