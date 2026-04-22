@@ -14,9 +14,11 @@
 
 use std::io::{ErrorKind, Read};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::Bytes;
+use futures_util::StreamExt;
 use reqwest::header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Method, RequestBuilder};
 use secrecy::{ExposeSecret, SecretString};
@@ -33,6 +35,7 @@ use crate::ids::{BucketUrl, DepositionFileId, DepositionId};
 use crate::metadata::DepositMetadataUpdate;
 use crate::model::{BucketObject, Deposition, DepositionFile};
 use crate::poll::PollOptions;
+use crate::progress::TransferProgress;
 
 /// Bearer-token authentication for Zenodo API requests.
 #[derive(Clone)]
@@ -602,28 +605,72 @@ impl ZenodoClient {
         filename: &str,
         path: &Path,
     ) -> Result<BucketObject, ZenodoError> {
-        self.upload_path_with_content_type(bucket, filename, path, mime::APPLICATION_OCTET_STREAM)
+        self.upload_path_with_progress(bucket, filename, path, ())
             .await
     }
 
-    pub(crate) async fn upload_path_with_content_type(
+    /// Uploads a local file to a Zenodo bucket while reporting progress.
+    ///
+    /// The supplied progress sink receives the fixed upload size before the
+    /// transfer starts and one `advance` event per streamed chunk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the local file cannot be read, if the upload URL
+    /// cannot be formed, or if Zenodo rejects the upload.
+    pub async fn upload_path_with_progress<P>(
+        &self,
+        bucket: &BucketUrl,
+        filename: &str,
+        path: &Path,
+        progress: P,
+    ) -> Result<BucketObject, ZenodoError>
+    where
+        P: TransferProgress + 'static,
+    {
+        self.upload_path_with_content_type_and_progress(
+            bucket,
+            filename,
+            path,
+            mime::APPLICATION_OCTET_STREAM,
+            progress,
+        )
+        .await
+    }
+
+    pub(crate) async fn upload_path_with_content_type_and_progress<P>(
         &self,
         bucket: &BucketUrl,
         filename: &str,
         path: &Path,
         content_type: mime::Mime,
-    ) -> Result<BucketObject, ZenodoError> {
+        progress: P,
+    ) -> Result<BucketObject, ZenodoError>
+    where
+        P: TransferProgress + 'static,
+    {
         let file = File::open(path).await?;
         let length = file.metadata().await?.len();
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(file));
+        let progress = Arc::new(progress);
+        progress.begin(Some(length));
+        let body_progress = Arc::clone(&progress);
+        let body = reqwest::Body::wrap_stream(ReaderStream::new(file).map(move |item| {
+            if let Ok(bytes) = &item {
+                body_progress.advance(bytes.len() as u64);
+            }
+            item
+        }));
 
-        self.execute_json(
-            self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
-                .header(CONTENT_LENGTH, length)
-                .header(CONTENT_TYPE, content_type.as_ref())
-                .body(body),
-        )
-        .await
+        let uploaded = self
+            .execute_json(
+                self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
+                    .header(CONTENT_LENGTH, length)
+                    .header(CONTENT_TYPE, content_type.as_ref())
+                    .body(body),
+            )
+            .await?;
+        progress.finish();
+        Ok(uploaded)
     }
 
     /// Uploads data from a blocking reader to a Zenodo bucket.
@@ -645,15 +692,47 @@ impl ZenodoClient {
     where
         R: Read + Send + 'static,
     {
-        let body = sized_body_from_reader(reader, content_length);
+        self.upload_reader_with_progress(bucket, filename, reader, content_length, content_type, ())
+            .await
+    }
 
-        self.execute_json(
-            self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
-                .header(CONTENT_LENGTH, content_length)
-                .header(CONTENT_TYPE, content_type.as_ref())
-                .body(body),
-        )
-        .await
+    /// Uploads data from a blocking reader to a Zenodo bucket while reporting progress.
+    ///
+    /// The caller must provide the exact content length. The supplied progress
+    /// sink receives the fixed upload size before the transfer starts and one
+    /// `advance` event per chunk that is accepted by the request body stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the upload URL cannot be formed, if the reader
+    /// fails, or if Zenodo rejects the upload.
+    pub async fn upload_reader_with_progress<R, P>(
+        &self,
+        bucket: &BucketUrl,
+        filename: &str,
+        reader: R,
+        content_length: u64,
+        content_type: mime::Mime,
+        progress: P,
+    ) -> Result<BucketObject, ZenodoError>
+    where
+        R: Read + Send + 'static,
+        P: TransferProgress + 'static,
+    {
+        let progress = Arc::new(progress);
+        progress.begin(Some(content_length));
+        let body = sized_body_from_reader(reader, content_length, Arc::clone(&progress));
+
+        let uploaded = self
+            .execute_json(
+                self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
+                    .header(CONTENT_LENGTH, content_length)
+                    .header(CONTENT_TYPE, content_type.as_ref())
+                    .body(body),
+            )
+            .await?;
+        progress.finish();
+        Ok(uploaded)
     }
 
     /// Publishes a draft deposition.
@@ -736,9 +815,10 @@ fn bucket_upload_url(bucket: &BucketUrl, filename: &str) -> Result<Url, ZenodoEr
     Ok(url)
 }
 
-fn sized_body_from_reader<R>(reader: R, content_length: u64) -> reqwest::Body
+fn sized_body_from_reader<R, P>(reader: R, content_length: u64, progress: Arc<P>) -> reqwest::Body
 where
     R: Read + Send + 'static,
+    P: TransferProgress + 'static,
 {
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(8);
 
@@ -762,6 +842,7 @@ where
                     if tx.blocking_send(Ok(Bytes::from(buf))).is_err() {
                         return;
                     }
+                    progress.advance(read as u64);
                 }
                 Err(error) => {
                     let _ = tx.blocking_send(Err(error));
@@ -952,7 +1033,8 @@ mod tests {
 
     #[tokio::test]
     async fn sized_body_from_reader_reports_short_reads() {
-        let body = super::sized_body_from_reader(Cursor::new(b"ab".to_vec()), 5);
+        let body =
+            super::sized_body_from_reader(Cursor::new(b"ab".to_vec()), 5, std::sync::Arc::new(()));
         let error = body.collect().await.unwrap_err();
         assert!(error.is_body());
     }
@@ -967,14 +1049,15 @@ mod tests {
 
     #[tokio::test]
     async fn sized_body_from_reader_reports_reader_errors() {
-        let body = super::sized_body_from_reader(BrokenReader, 5);
+        let body = super::sized_body_from_reader(BrokenReader, 5, std::sync::Arc::new(()));
         let error = body.collect().await.unwrap_err();
         assert!(error.is_body());
     }
 
     #[tokio::test]
     async fn sized_body_from_reader_tolerates_dropped_receiver() {
-        let body = super::sized_body_from_reader(Cursor::new(b"abc".to_vec()), 3);
+        let body =
+            super::sized_body_from_reader(Cursor::new(b"abc".to_vec()), 3, std::sync::Arc::new(()));
         drop(body);
         tokio::time::sleep(Duration::from_millis(10)).await;
     }

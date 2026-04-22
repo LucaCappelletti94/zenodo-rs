@@ -16,6 +16,7 @@ all-features = true
 [features]
 default = ["rustls-tls"]
 checksums = ["dep:md-5", "dep:hex"]
+indicatif = ["dep:indicatif"]
 native-tls = ["reqwest/native-tls"]
 rustls-tls = ["reqwest/rustls"]
 
@@ -26,6 +27,7 @@ chrono = { version = "0.4.44", features = ["serde"] }
 futures-core = "0.3.32"
 futures-util = "0.3.32"
 hex = { version = "0.4.3", optional = true }
+indicatif = { version = "0.17.11", optional = true }
 md-5 = { version = "0.11.0", optional = true }
 mime = "0.3.17"
 mime_guess = "2.0.5"

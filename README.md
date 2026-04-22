@@ -29,6 +29,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 Optional features:
 
 - `checksums`: validate Zenodo `md5:` checksums when downloading to a path
+- `indicatif`: implement `TransferProgress` for `indicatif::ProgressBar`
 - `native-tls`: use `reqwest` with `native-tls` instead of the default `rustls-tls`
 
 ## Read Example
@@ -79,6 +80,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `ZENODO_TOKEN` is the standard env var for the production service at [zenodo.org](https://zenodo.org/).
 - `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent for [sandbox.zenodo.org](https://sandbox.zenodo.org/).
 - Write flows usually need `deposit:write` and `deposit:actions`.
+
+## Progress Bars
+
+Enable the `indicatif` feature if you want `indicatif::ProgressBar` to work
+directly with `upload_path_with_progress`, `upload_reader_with_progress`,
+`reconcile_files_with_progress`, and `download_artifact_with_progress`.
+
+```rust
+#[cfg(feature = "indicatif")]
+{
+    use indicatif::ProgressBar;
+    use zenodo_rs::TransferProgress;
+
+    let bar = ProgressBar::new(0);
+    bar.begin(Some(5));
+    bar.advance(2);
+    assert_eq!(bar.length(), Some(5));
+    assert_eq!(bar.position(), 2);
+    bar.finish();
+}
+```
+
+Pass `bar.clone()` into the progress-aware upload and download helpers when you
+want a real terminal progress bar during transfers.
 
 ## Notes
 

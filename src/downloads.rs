@@ -25,6 +25,7 @@ use crate::client::ZenodoClient;
 use crate::error::ZenodoError;
 use crate::ids::{Doi, RecordId};
 use crate::model::Record;
+use crate::progress::TransferProgress;
 use crate::records::{ArtifactSelector, RecordSelector};
 
 /// Streaming download response metadata plus the response body stream.
@@ -143,13 +144,37 @@ impl ZenodoClient {
         key: &str,
         path: &Path,
     ) -> Result<ResolvedDownload, ZenodoError> {
-        self.download_artifact(
+        self.download_record_file_by_key_to_path_with_progress(id, key, path, ())
+            .await
+    }
+
+    /// Downloads a named file from a specific record to a local path while reporting progress.
+    ///
+    /// Returns resolution metadata describing the record and file that
+    /// ultimately produced the bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the record lookup fails, if the file is missing, or
+    /// if writing the destination path fails.
+    pub async fn download_record_file_by_key_to_path_with_progress<P>(
+        &self,
+        id: RecordId,
+        key: &str,
+        path: &Path,
+        progress: P,
+    ) -> Result<ResolvedDownload, ZenodoError>
+    where
+        P: TransferProgress,
+    {
+        self.download_artifact_with_progress(
             &ArtifactSelector::FileByKey {
                 record: RecordSelector::RecordId(id),
                 key: key.to_owned(),
                 latest: false,
             },
             path,
+            progress,
         )
         .await
     }
@@ -166,13 +191,34 @@ impl ZenodoClient {
         key: &str,
         path: &Path,
     ) -> Result<ResolvedDownload, ZenodoError> {
-        self.download_artifact(
+        self.download_latest_record_file_by_key_to_path_with_progress(id, key, path, ())
+            .await
+    }
+
+    /// Downloads a named file from the latest record version to a local path while reporting progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if latest-version resolution fails, if the file is
+    /// missing, or if writing the destination path fails.
+    pub async fn download_latest_record_file_by_key_to_path_with_progress<P>(
+        &self,
+        id: RecordId,
+        key: &str,
+        path: &Path,
+        progress: P,
+    ) -> Result<ResolvedDownload, ZenodoError>
+    where
+        P: TransferProgress,
+    {
+        self.download_artifact_with_progress(
             &ArtifactSelector::FileByKey {
                 record: RecordSelector::RecordId(id),
                 key: key.to_owned(),
                 latest: true,
             },
             path,
+            progress,
         )
         .await
     }
@@ -191,12 +237,35 @@ impl ZenodoClient {
         id: RecordId,
         path: &Path,
     ) -> Result<ResolvedDownload, ZenodoError> {
-        self.download_artifact(
+        self.download_record_archive_to_path_with_progress(id, path, ())
+            .await
+    }
+
+    /// Downloads the archive for a specific record to a local path while reporting progress.
+    ///
+    /// Returns resolution metadata describing the record that produced the
+    /// archive bytes.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the record lookup fails, if the archive link is
+    /// missing, or if writing the destination path fails.
+    pub async fn download_record_archive_to_path_with_progress<P>(
+        &self,
+        id: RecordId,
+        path: &Path,
+        progress: P,
+    ) -> Result<ResolvedDownload, ZenodoError>
+    where
+        P: TransferProgress,
+    {
+        self.download_artifact_with_progress(
             &ArtifactSelector::Archive {
                 record: RecordSelector::RecordId(id),
                 latest: false,
             },
             path,
+            progress,
         )
         .await
     }
@@ -214,13 +283,35 @@ impl ZenodoClient {
         latest: bool,
         path: &Path,
     ) -> Result<ResolvedDownload, ZenodoError> {
-        self.download_artifact(
+        self.download_file_by_doi_to_path_with_progress(doi, key, latest, path, ())
+            .await
+    }
+
+    /// Downloads a named file after resolving a DOI to a record while reporting progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if DOI resolution fails, if the file is missing, or if
+    /// writing the destination path fails.
+    pub async fn download_file_by_doi_to_path_with_progress<P>(
+        &self,
+        doi: &Doi,
+        key: &str,
+        latest: bool,
+        path: &Path,
+        progress: P,
+    ) -> Result<ResolvedDownload, ZenodoError>
+    where
+        P: TransferProgress,
+    {
+        self.download_artifact_with_progress(
             &ArtifactSelector::FileByKey {
                 record: RecordSelector::Doi(doi.clone()),
                 key: key.to_owned(),
                 latest,
             },
             path,
+            progress,
         )
         .await
     }
@@ -257,11 +348,36 @@ impl ZenodoClient {
         selector: &ArtifactSelector,
         destination: &Path,
     ) -> Result<ResolvedDownload, ZenodoError> {
+        self.download_artifact_with_progress(selector, destination, ())
+            .await
+    }
+
+    /// Downloads an artifact selected by high-level record or DOI selectors while reporting progress.
+    ///
+    /// The supplied progress sink receives the response `Content-Length` when
+    /// Zenodo provides one and one `advance` event per chunk successfully
+    /// written to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if record resolution fails, if the requested artifact
+    /// is unavailable, if checksum validation fails, or if writing the
+    /// destination path fails.
+    pub async fn download_artifact_with_progress<P>(
+        &self,
+        selector: &ArtifactSelector,
+        destination: &Path,
+        progress: P,
+    ) -> Result<ResolvedDownload, ZenodoError>
+    where
+        P: TransferProgress,
+    {
         let resolved = self.resolve_artifact(selector).await?;
-        let bytes_written = write_stream_to_path(
+        let bytes_written = write_stream_to_path_with_progress(
             self.open_download_url(&resolved.url).await?,
             destination,
             resolved.checksum.as_deref(),
+            progress,
         )
         .await?;
 
@@ -336,12 +452,17 @@ impl ZenodoClient {
     }
 }
 
-async fn write_stream_to_path(
+async fn write_stream_to_path_with_progress<P>(
     mut stream: DownloadStream,
     path: &Path,
     #[cfg(feature = "checksums")] expected_checksum: Option<&str>,
     #[cfg(not(feature = "checksums"))] _expected_checksum: Option<&str>,
-) -> Result<u64, ZenodoError> {
+    progress: P,
+) -> Result<u64, ZenodoError>
+where
+    P: TransferProgress,
+{
+    progress.begin(stream.content_length);
     let temp = tempfile::Builder::new()
         .prefix(".zenodo-rs-download-")
         .tempfile_in(download_parent_directory(path))?;
@@ -360,6 +481,7 @@ async fn write_stream_to_path(
             }
             file.write_all(&chunk).await?;
             bytes_written += chunk.len() as u64;
+            progress.advance(chunk.len() as u64);
             Ok::<(), ZenodoError>(())
         }
         .await;
@@ -382,6 +504,7 @@ async fn write_stream_to_path(
     }
     temp.persist(path)
         .map_err(|error| ZenodoError::Io(error.error))?;
+    progress.finish();
     Ok(bytes_written)
 }
 

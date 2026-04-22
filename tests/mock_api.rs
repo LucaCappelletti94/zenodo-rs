@@ -21,6 +21,7 @@ use client_uploader_traits::{
 use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use axum::http::{Method, StatusCode};
 use serde_json::json;
@@ -132,6 +133,64 @@ async fn spawn_raw_server(response_bytes: &'static [u8]) -> url::Url {
     });
 
     url::Url::parse(&format!("http://{addr}/api/")).expect("raw base url")
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProgressEvent {
+    Begin(Option<u64>),
+    Advance(u64),
+    Finish,
+}
+
+#[derive(Clone, Default)]
+struct RecordedProgress {
+    events: Arc<Mutex<Vec<ProgressEvent>>>,
+}
+
+impl RecordedProgress {
+    fn snapshot(&self) -> Vec<ProgressEvent> {
+        self.events.lock().expect("progress events").clone()
+    }
+}
+
+impl zenodo_rs::TransferProgress for RecordedProgress {
+    fn begin(&self, total_bytes: Option<u64>) {
+        self.events
+            .lock()
+            .expect("progress events")
+            .push(ProgressEvent::Begin(total_bytes));
+    }
+
+    fn advance(&self, delta: u64) {
+        self.events
+            .lock()
+            .expect("progress events")
+            .push(ProgressEvent::Advance(delta));
+    }
+
+    fn finish(&self) {
+        self.events
+            .lock()
+            .expect("progress events")
+            .push(ProgressEvent::Finish);
+    }
+}
+
+fn assert_completed_progress(progress: &RecordedProgress, total_bytes: u64) {
+    let events = progress.snapshot();
+    assert_eq!(
+        events.first(),
+        Some(&ProgressEvent::Begin(Some(total_bytes)))
+    );
+    assert_eq!(events.last(), Some(&ProgressEvent::Finish));
+    let advanced = events
+        .iter()
+        .map(|event| match event {
+            ProgressEvent::Advance(delta) => *delta,
+            ProgressEvent::Begin(_) | ProgressEvent::Finish => 0,
+        })
+        .sum::<u64>();
+    assert_eq!(advanced, total_bytes);
 }
 
 #[tokio::test]
@@ -246,19 +305,22 @@ async fn upload_path_and_reader_send_known_content_length() {
 
     let temp = Builder::new().suffix(".txt").tempfile().expect("temp file");
     std::fs::write(temp.path(), b"data").expect("write temp file");
+    let path_progress = RecordedProgress::default();
+    let reader_progress = RecordedProgress::default();
 
     client
-        .upload_path(&bucket, "artifact.txt", temp.path())
+        .upload_path_with_progress(&bucket, "artifact.txt", temp.path(), path_progress.clone())
         .await
         .expect("upload path");
 
     client
-        .upload_reader(
+        .upload_reader_with_progress(
             &bucket,
             "reader.bin",
             Cursor::new(b"12345".to_vec()),
             5,
             mime::APPLICATION_OCTET_STREAM,
+            reader_progress.clone(),
         )
         .await
         .expect("upload reader");
@@ -288,6 +350,63 @@ async fn upload_path_and_reader_send_known_content_length() {
         requests[1].headers.get("content-type").map(String::as_str),
         Some("application/octet-stream")
     );
+    assert_completed_progress(&path_progress, 4);
+    assert_completed_progress(&reader_progress, 5);
+}
+
+#[tokio::test]
+async fn reconcile_files_with_progress_reports_aggregate_bytes() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let draft: zenodo_rs::Deposition =
+        serde_json::from_value(deposition_json(&server, 202, false, "inprogress"))
+            .expect("draft json");
+    let progress = RecordedProgress::default();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/202",
+        StatusCode::OK,
+        deposition_json(&server, 202, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-202/first.bin",
+        StatusCode::OK,
+        json!({ "key": "first.bin", "size": 2 }),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-202/second.bin",
+        StatusCode::OK,
+        json!({ "key": "second.bin", "size": 3 }),
+    );
+
+    let uploaded = client
+        .reconcile_files_with_progress(
+            &draft,
+            FileReplacePolicy::KeepExistingAndAdd,
+            vec![
+                UploadSpec::from_reader(
+                    "first.bin",
+                    Cursor::new(b"12".to_vec()),
+                    2,
+                    mime::APPLICATION_OCTET_STREAM,
+                ),
+                UploadSpec::from_reader(
+                    "second.bin",
+                    Cursor::new(b"345".to_vec()),
+                    3,
+                    mime::APPLICATION_OCTET_STREAM,
+                ),
+            ],
+            progress.clone(),
+        )
+        .await
+        .expect("reconcile files with progress");
+
+    assert_eq!(uploaded.len(), 2);
+    assert_completed_progress(&progress, 5);
 }
 
 #[tokio::test]
@@ -784,6 +903,51 @@ async fn open_artifact_exposes_response_headers() {
         requests[1].headers.get("accept").map(String::as_str),
         Some("application/json")
     );
+}
+
+#[tokio::test]
+async fn download_artifact_with_progress_reports_transferred_bytes() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let progress = RecordedProgress::default();
+    let dir = tempdir().expect("download tempdir");
+    let path = dir.path().join("artifact.bin");
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/610",
+        StatusCode::OK,
+        record_json(&server, 610),
+    );
+    server.enqueue(
+        Method::GET,
+        "/api/download/610/artifact.bin",
+        QueuedResponse::bytes(
+            StatusCode::OK,
+            vec![
+                ("content-type".into(), "application/octet-stream".into()),
+                ("content-length".into(), "5".into()),
+            ],
+            b"hello".to_vec(),
+        ),
+    );
+
+    let download = client
+        .download_artifact_with_progress(
+            &ArtifactSelector::FileByKey {
+                record: RecordSelector::RecordId(RecordId(610)),
+                key: "artifact.bin".into(),
+                latest: false,
+            },
+            &path,
+            progress.clone(),
+        )
+        .await
+        .expect("download artifact with progress");
+
+    assert_eq!(download.bytes_written, 5);
+    assert_eq!(std::fs::read(&path).expect("read artifact"), b"hello");
+    assert_completed_progress(&progress, 5);
 }
 
 #[tokio::test]

@@ -35,6 +35,7 @@ pub mod metadata;
 pub mod model;
 pub mod pagination;
 pub mod poll;
+pub mod progress;
 pub mod records;
 mod serde_util;
 pub mod upload;
@@ -61,6 +62,7 @@ pub use model::{
 };
 pub use pagination::Page;
 pub use poll::PollOptions;
+pub use progress::TransferProgress;
 pub use records::{
     ArtifactSelector, RecordQuery, RecordQueryBuilder, RecordQueryStatus, RecordSelector,
     RecordSort,

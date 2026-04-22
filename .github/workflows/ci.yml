@@ -112,6 +112,8 @@ jobs:
         include:
           - name: default
             command: cargo test --locked
+          - name: indicatif
+            command: cargo test --features indicatif --locked
           - name: all-features
             command: cargo test --all-features --locked
           - name: native-tls-checksums

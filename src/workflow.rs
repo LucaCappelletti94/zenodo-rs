@@ -13,6 +13,7 @@
 //!
 //! If you want to call raw endpoints one by one, use [`crate::client`] instead.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use client_uploader_traits::collect_upload_filenames;
@@ -24,6 +25,7 @@ use crate::error::ZenodoError;
 use crate::ids::DepositionId;
 use crate::metadata::DepositMetadataUpdate;
 use crate::model::{Deposition, PublishedRecord};
+use crate::progress::TransferProgress;
 use crate::upload::{FileReplacePolicy, UploadSource, UploadSpec};
 
 /// Action needed to obtain an editable draft.
@@ -69,6 +71,17 @@ pub fn editable_draft_action(deposition: &Deposition) -> EditableDraftAction {
 
 fn deposition_allows_metadata_edits(deposition: &Deposition) -> bool {
     deposition.allows_metadata_edits()
+}
+
+struct ForwardOnlyProgress<P>(P);
+
+impl<P> TransferProgress for ForwardOnlyProgress<P>
+where
+    P: TransferProgress,
+{
+    fn advance(&self, delta: u64) {
+        self.0.advance(delta);
+    }
 }
 
 pub(crate) fn file_ids_to_delete(
@@ -278,6 +291,33 @@ impl ZenodoClient {
     where
         I: IntoIterator<Item = UploadSpec>,
     {
+        self.reconcile_files_with_progress(draft, policy, files, ())
+            .await
+    }
+
+    /// Reconciles a draft's visible files and reports aggregate upload progress.
+    ///
+    /// The supplied progress sink receives the sum of all upload content
+    /// lengths before the first upload starts and one `advance` event as each
+    /// upload streams bytes into the request body.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the draft cannot be refreshed, if the bucket link is
+    /// missing, if duplicate upload filenames are provided, if a keep-existing
+    /// upload would overwrite an existing draft filename, if reading a source
+    /// path length fails, if file deletion fails, or if any upload fails.
+    pub async fn reconcile_files_with_progress<I, P>(
+        &self,
+        draft: &Deposition,
+        policy: FileReplacePolicy,
+        files: I,
+        progress: P,
+    ) -> Result<Vec<crate::model::BucketObject>, ZenodoError>
+    where
+        I: IntoIterator<Item = UploadSpec>,
+        P: TransferProgress + 'static,
+    {
         let files: Vec<_> = files.into_iter().collect();
         let refreshed = self.get_deposition(draft.id).await?;
         let bucket = refreshed
@@ -292,10 +332,23 @@ impl ZenodoClient {
             self.delete_file(refreshed.id, file_id).await?;
         }
 
+        let total_bytes = files.iter().try_fold(0_u64, |total, spec| {
+            Ok::<u64, std::io::Error>(total + spec.content_length()?)
+        })?;
+        let progress = Arc::new(progress);
+        progress.begin(Some(total_bytes));
         let mut uploaded = Vec::new();
         for spec in files {
-            uploaded.push(self.upload_spec(&bucket, spec).await?);
+            uploaded.push(
+                self.upload_spec_with_progress(
+                    &bucket,
+                    spec,
+                    ForwardOnlyProgress(Arc::clone(&progress)),
+                )
+                .await?,
+            );
         }
+        progress.finish();
 
         Ok(uploaded)
     }
@@ -491,26 +544,37 @@ impl ZenodoClient {
         )))
     }
 
-    async fn upload_spec(
+    async fn upload_spec_with_progress<P>(
         &self,
         bucket: &crate::ids::BucketUrl,
         spec: UploadSpec,
-    ) -> Result<crate::model::BucketObject, ZenodoError> {
+        progress: P,
+    ) -> Result<crate::model::BucketObject, ZenodoError>
+    where
+        P: TransferProgress + 'static,
+    {
         match spec.source {
             UploadSource::Path(path) => {
-                self.upload_path_with_content_type(bucket, &spec.filename, &path, spec.content_type)
-                    .await
+                self.upload_path_with_content_type_and_progress(
+                    bucket,
+                    &spec.filename,
+                    &path,
+                    spec.content_type,
+                    progress,
+                )
+                .await
             }
             UploadSource::Reader {
                 reader,
                 content_length,
             } => {
-                self.upload_reader(
+                self.upload_reader_with_progress(
                     bucket,
                     &spec.filename,
                     reader,
                     content_length,
                     spec.content_type,
+                    progress,
                 )
                 .await
             }
