@@ -658,7 +658,7 @@ mod tests {
         let record: Record = serde_json::from_value(json!({
             "created": "2026-04-03T12:00:00+00:00",
             "updated": "2026-04-03T13:00:00+00:00",
-            "id": 19701295,
+            "id": 19_701_295,
             "recid": "19701295",
             "doi": "10.5281/zenodo.19701295",
             "metadata": {
@@ -675,7 +675,7 @@ mod tests {
                 {
                     "id": "f1",
                     "key": "npclassifier-distilled.parquet",
-                    "size": 123456,
+                    "size": 123_456,
                     "checksum": "md5:0123456789abcdef0123456789abcdef",
                     "links": {
                         "self": "https://zenodo.org/api/records/19701295/files/npclassifier-distilled.parquet",
@@ -712,7 +712,7 @@ mod tests {
         assert_eq!(record.id.0, 19_701_295);
         assert_eq!(record.recid, "19701295");
         assert_eq!(
-            record.doi.as_ref().map(|doi| doi.as_str()),
+            record.doi.as_ref().map(crate::Doi::as_str),
             Some("10.5281/zenodo.19701295")
         );
         assert_eq!(record.metadata.communities.len(), 1);
@@ -724,7 +724,7 @@ mod tests {
             record
                 .file_by_key("npclassifier-distilled.parquet")
                 .and_then(|file| file.download_url())
-                .map(|url| url.as_str()),
+                .map(url::Url::as_str),
             Some(
                 "https://zenodo.org/records/19701295/files/npclassifier-distilled.parquet/content"
             )
