@@ -628,6 +628,110 @@ mod tests {
     }
 
     #[test]
+    fn record_accepts_community_id_alias_in_metadata() {
+        let record: Record = serde_json::from_value(json!({
+            "created": "2026-04-03T12:00:00+00:00",
+            "updated": "2026-04-03T13:00:00+00:00",
+            "id": 42,
+            "recid": "42",
+            "metadata": {
+                "title": "artifact",
+                "communities": [
+                    { "id": "earth-metabolome" }
+                ]
+            },
+            "files": [],
+            "links": {}
+        }))
+        .unwrap();
+
+        assert_eq!(record.metadata.communities.len(), 1);
+        assert_eq!(
+            record.metadata.communities[0].identifier,
+            "earth-metabolome"
+        );
+    }
+
+    #[test]
+    fn record_deserializes_minimized_live_19701295_shape() {
+        // Mirrors the fields used by downstream download code from the live Zenodo record.
+        let record: Record = serde_json::from_value(json!({
+            "created": "2026-04-03T12:00:00+00:00",
+            "updated": "2026-04-03T13:00:00+00:00",
+            "id": 19701295,
+            "recid": "19701295",
+            "doi": "10.5281/zenodo.19701295",
+            "metadata": {
+                "title": "NPClassifier distilled dataset",
+                "publication_date": "2026-04-03",
+                "creators": [{ "name": "Doe, Jane" }],
+                "access_right": "open",
+                "resource_type": { "type": "dataset", "title": "Dataset" },
+                "communities": [
+                    { "id": "earth-metabolome" }
+                ]
+            },
+            "files": [
+                {
+                    "id": "f1",
+                    "key": "npclassifier-distilled.parquet",
+                    "size": 123456,
+                    "checksum": "md5:0123456789abcdef0123456789abcdef",
+                    "links": {
+                        "self": "https://zenodo.org/api/records/19701295/files/npclassifier-distilled.parquet",
+                        "content": "https://zenodo.org/records/19701295/files/npclassifier-distilled.parquet/content"
+                    }
+                }
+            ],
+            "links": {
+                "self": "https://zenodo.org/api/records/19701295",
+                "self_html": "https://zenodo.org/records/19701295",
+                "html": "https://zenodo.org/records/19701295",
+                "latest": "https://zenodo.org/api/records/19701295",
+                "versions": "https://zenodo.org/api/records/19701295/versions",
+                "files": "https://zenodo.org/api/records/19701295/files",
+                "archive": "https://zenodo.org/api/records/19701295/files-archive",
+                "doi": "https://doi.org/10.5281/zenodo.19701295"
+            },
+            "pids": {
+                "doi": {
+                    "identifier": "10.5281/zenodo.19701295"
+                },
+                "recid": {
+                    "identifier": "19701295"
+                }
+            },
+            "stats": {
+                "downloads": 0,
+                "views": 0
+            },
+            "status": "published"
+        }))
+        .unwrap();
+
+        assert_eq!(record.id.0, 19_701_295);
+        assert_eq!(record.recid, "19701295");
+        assert_eq!(
+            record.doi.as_ref().map(|doi| doi.as_str()),
+            Some("10.5281/zenodo.19701295")
+        );
+        assert_eq!(record.metadata.communities.len(), 1);
+        assert_eq!(
+            record.metadata.communities[0].identifier,
+            "earth-metabolome"
+        );
+        assert_eq!(
+            record
+                .file_by_key("npclassifier-distilled.parquet")
+                .and_then(|file| file.download_url())
+                .map(|url| url.as_str()),
+            Some(
+                "https://zenodo.org/records/19701295/files/npclassifier-distilled.parquet/content"
+            )
+        );
+    }
+
+    #[test]
     fn record_accepts_both_modified_and_updated_timestamps() {
         let record: Record = serde_json::from_value(json!({
             "created": "2026-04-03T12:00:00+00:00",

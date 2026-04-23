@@ -778,6 +778,7 @@ impl RelatedIdentifierBuilder {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct CommunityRef {
     /// Community identifier.
+    #[serde(alias = "id")]
     pub identifier: String,
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
@@ -2102,6 +2103,27 @@ mod tests {
         assert_eq!(
             metadata.thesis_university.as_deref(),
             Some("Example University")
+        );
+    }
+
+    #[test]
+    fn published_record_metadata_accepts_community_id_alias() {
+        let metadata: RecordMetadata = serde_json::from_str(
+            r#"{
+                "title": "Rich record",
+                "creators": [{ "name": "Doe, Jane" }],
+                "communities": [
+                    { "id": "earth-metabolome", "title": "Earth Metabolome" }
+                ]
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(metadata.communities.len(), 1);
+        assert_eq!(metadata.communities[0].identifier, "earth-metabolome");
+        assert_eq!(
+            metadata.communities[0].extra.get("title"),
+            Some(&json!("Earth Metabolome"))
         );
     }
 
