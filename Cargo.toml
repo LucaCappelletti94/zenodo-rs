@@ -14,6 +14,11 @@ categories = ["api-bindings", "science"]
 features = ["rustls-ring-tls", "checksums", "indicatif"]
 no-default-features = true
 
+[package.metadata.cargo-semver-checks.lints]
+# v0.1.7 intentionally changes the default TLS provider from the legacy
+# AWS-LC-backed reqwest/rustls feature to the ring-backed rustls feature.
+feature_not_enabled_by_default = "warn"
+
 [features]
 default = ["rustls-ring-tls"]
 checksums = ["dep:md-5", "dep:hex"]
