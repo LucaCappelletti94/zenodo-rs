@@ -181,7 +181,7 @@ jobs:
         uses: taiki-e/install-action@cargo-semver-checks
 
       - name: Check semver compatibility
-        run: cargo semver-checks check-release --release-type patch
+        run: cargo semver-checks check-release --release-type patch --default-features --features checksums,indicatif
 
   audit:
     name: Audit
