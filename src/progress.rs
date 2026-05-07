@@ -174,6 +174,7 @@ mod tests {
         assert_eq!(bar.length(), Some(5));
         assert_eq!(bar.position(), 2);
 
-        bar.finish();
+        TransferProgress::finish(&bar);
+        assert!(bar.is_finished());
     }
 }

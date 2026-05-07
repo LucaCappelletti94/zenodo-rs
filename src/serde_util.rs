@@ -256,4 +256,16 @@ mod tests {
         assert!(!negative.to_string().is_empty());
         assert!(fractional.to_string().contains("integer-like"));
     }
+
+    #[test]
+    fn invalid_wire_types_report_expected_shapes() {
+        let u64_error =
+            serde_json::from_value::<U64Holder>(serde_json::json!({ "value": true })).unwrap_err();
+        let string_error =
+            serde_json::from_value::<StringHolder>(serde_json::json!({ "value": true }))
+                .unwrap_err();
+
+        assert!(u64_error.to_string().contains("non-negative integer"));
+        assert!(string_error.to_string().contains("string, integer"));
+    }
 }

@@ -410,6 +410,72 @@ async fn reconcile_files_with_progress_reports_aggregate_bytes() {
 }
 
 #[tokio::test]
+async fn reconcile_files_with_progress_uploads_path_and_reader_sources() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let draft: zenodo_rs::Deposition =
+        serde_json::from_value(deposition_json(&server, 203, false, "inprogress"))
+            .expect("draft json");
+    let progress = RecordedProgress::default();
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("path.bin");
+    std::fs::write(&path, b"path").expect("write upload file");
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/203",
+        StatusCode::OK,
+        deposition_json(&server, 203, false, "inprogress"),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-203/path.bin",
+        StatusCode::OK,
+        json!({ "key": "path.bin", "size": 4 }),
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-203/reader.bin",
+        StatusCode::OK,
+        json!({ "key": "reader.bin", "size": 6 }),
+    );
+
+    let uploaded = client
+        .reconcile_files_with_progress(
+            &draft,
+            FileReplacePolicy::ReplaceAll,
+            vec![
+                UploadSpec::from_path(&path).expect("path upload spec"),
+                UploadSpec::from_reader(
+                    "reader.bin",
+                    Cursor::new(b"reader".to_vec()),
+                    6,
+                    mime::APPLICATION_OCTET_STREAM,
+                ),
+            ],
+            progress.clone(),
+        )
+        .await
+        .expect("reconcile files with progress");
+
+    assert_eq!(uploaded.len(), 2);
+    assert_completed_progress(&progress, 10);
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(
+        paths,
+        vec![
+            "/api/deposit/depositions/203",
+            "/api/files/bucket-203/path.bin",
+            "/api/files/bucket-203/reader.bin",
+        ]
+    );
+}
+
+#[tokio::test]
 async fn search_and_version_helpers_follow_record_links() {
     let server = MockZenodoServer::start().await;
     let client = server.client();
@@ -2668,6 +2734,55 @@ async fn reconcile_files_rejects_duplicate_uploaded_filenames() {
 }
 
 #[tokio::test]
+async fn reconcile_files_with_progress_rejects_duplicate_uploaded_filenames() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let progress = RecordedProgress::default();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/204",
+        StatusCode::OK,
+        deposition_json(&server, 204, false, "inprogress"),
+    );
+
+    let error = client
+        .reconcile_files_with_progress(
+            &serde_json::from_value(deposition_json(&server, 204, false, "inprogress"))
+                .expect("draft"),
+            FileReplacePolicy::ReplaceAll,
+            vec![
+                UploadSpec::from_reader(
+                    "artifact.bin",
+                    Cursor::new(vec![1_u8]),
+                    1,
+                    mime::APPLICATION_OCTET_STREAM,
+                ),
+                UploadSpec::from_reader(
+                    "artifact.bin",
+                    Cursor::new(vec![2_u8]),
+                    1,
+                    mime::APPLICATION_OCTET_STREAM,
+                ),
+            ],
+            progress,
+        )
+        .await
+        .expect_err("duplicate uploads should fail");
+
+    assert!(matches!(
+        error,
+        ZenodoError::DuplicateUploadFilename { filename } if filename == "artifact.bin"
+    ));
+    let paths: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.path)
+        .collect();
+    assert_eq!(paths, vec!["/api/deposit/depositions/204"]);
+}
+
+#[tokio::test]
 async fn enter_edit_mode_waits_for_current_record_to_become_editable() {
     let server = MockZenodoServer::start().await;
     let client = server.client();
@@ -2860,6 +2975,190 @@ async fn enter_edit_mode_can_follow_latest_draft_link() {
         .expect("latest draft edit mode");
     assert_eq!(draft.id, DepositionId(99));
     assert!(!draft.is_published());
+}
+
+#[tokio::test]
+async fn enter_edit_mode_retries_when_latest_draft_is_current_or_absent() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/205",
+        StatusCode::OK,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/205")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/205/actions/edit",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/205")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/205",
+        StatusCode::OK,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/205"),
+                "latest_draft": server.url("deposit/depositions/205")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/205",
+        StatusCode::OK,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/205")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/205",
+        StatusCode::OK,
+        json!({
+            "id": 205,
+            "submitted": true,
+            "state": "inprogress",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/205")
+            }
+        }),
+    );
+
+    let draft = client
+        .enter_edit_mode(DepositionId(205))
+        .await
+        .expect("edit mode");
+
+    assert_eq!(draft.id, DepositionId(205));
+    assert_eq!(draft.status.state, zenodo_rs::DepositState::InProgress);
+}
+
+#[tokio::test]
+async fn enter_edit_mode_retries_or_fails_after_latest_draft_fetch_errors() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/206",
+        StatusCode::OK,
+        json!({
+            "id": 206,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/206")
+            }
+        }),
+    );
+    server.enqueue_json(
+        Method::POST,
+        "/api/deposit/depositions/206/actions/edit",
+        StatusCode::ACCEPTED,
+        json!({
+            "id": 206,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/206"),
+                "latest_draft": server.url("deposit/depositions/207")
+            }
+        }),
+    );
+    for _ in 0..3 {
+        server.enqueue_json(
+            Method::GET,
+            "/api/deposit/depositions/206",
+            StatusCode::OK,
+            json!({
+                "id": 206,
+                "submitted": true,
+                "state": "done",
+                "metadata": {},
+                "files": [],
+                "links": {
+                    "self": server.url("deposit/depositions/206"),
+                    "latest_draft": server.url("deposit/depositions/207")
+                }
+            }),
+        );
+    }
+    server.enqueue_json(
+        Method::GET,
+        "/api/deposit/depositions/207",
+        StatusCode::OK,
+        json!({
+            "id": 207,
+            "submitted": true,
+            "state": "done",
+            "metadata": {},
+            "files": [],
+            "links": {
+                "self": server.url("deposit/depositions/207")
+            }
+        }),
+    );
+    server.enqueue_text(
+        Method::GET,
+        "/api/deposit/depositions/207",
+        StatusCode::TOO_MANY_REQUESTS,
+        "too many requests",
+    );
+    server.enqueue_text(
+        Method::GET,
+        "/api/deposit/depositions/207",
+        StatusCode::BAD_REQUEST,
+        "bad draft link",
+    );
+
+    let error = client
+        .enter_edit_mode(DepositionId(206))
+        .await
+        .expect_err("non-retryable latest draft error should fail");
+
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::BAD_REQUEST
+    ));
 }
 
 #[tokio::test]
