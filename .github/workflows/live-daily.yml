@@ -22,10 +22,14 @@ jobs:
         include:
           - name: default
             command: cargo test --locked
-          - name: all-features
-            command: cargo test --all-features --locked
+          - name: rustls-ring-checksums-indicatif
+            command: cargo test --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
+          - name: rustls-aws-lc-checksums
+            command: cargo test --no-default-features --features rustls-tls,checksums --locked
           - name: native-tls-checksums
             command: cargo test --no-default-features --features native-tls,checksums --locked
+          - name: rustls-no-provider-checksums
+            command: cargo check --no-default-features --features rustls-no-provider,checksums --locked
 
     steps:
       - name: Checkout
@@ -66,4 +70,4 @@ jobs:
           test -n "$ZENODO_SANDBOX_TOKEN" || { echo "Missing ZENODO_SANDBOX_TOKEN secret"; exit 1; }
 
       - name: Run full sandbox smoke suite
-        run: cargo test --test sandbox_light --all-features --locked -- --ignored --nocapture --test-threads=1
+        run: cargo test --test sandbox_light --no-default-features --features rustls-ring-tls,checksums,indicatif --locked -- --ignored --nocapture --test-threads=1

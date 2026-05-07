@@ -30,7 +30,13 @@ Optional features:
 
 - `checksums`: validate Zenodo `md5:` checksums when downloading to a path
 - `indicatif`: implement `TransferProgress` for `indicatif::ProgressBar`
-- `native-tls`: use `reqwest` with `native-tls` instead of the default `rustls-tls`
+- `rustls-ring-tls`: default Rustls transport using the Ring crypto provider, avoiding `aws-lc-sys`
+- `rustls-tls`: backward-compatible `reqwest/rustls` transport using the AWS-LC-backed Rustls provider
+- `rustls-no-provider`: advanced Rustls transport for applications that install their own process-wide `rustls::crypto::CryptoProvider`
+- `native-tls`: use `reqwest` with `native-tls` instead of Rustls
+
+The TLS features are mutually exclusive. Use `default-features = false` before
+selecting a non-default TLS backend.
 
 ## Read Example
 

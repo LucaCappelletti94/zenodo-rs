@@ -269,6 +269,8 @@ impl ZenodoClientBuilder {
     ///
     /// Returns an error if the underlying `reqwest` client cannot be built.
     pub fn build(self) -> Result<ZenodoClient, ZenodoError> {
+        ensure_rustls_provider();
+
         let user_agent = self
             .user_agent
             .unwrap_or_else(|| format!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
@@ -292,6 +294,17 @@ impl ZenodoClientBuilder {
         })
     }
 }
+
+#[cfg(feature = "rustls-ring-tls")]
+pub(crate) fn ensure_rustls_provider() {
+    static INSTALL: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    INSTALL.get_or_init(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
+#[cfg(not(feature = "rustls-ring-tls"))]
+pub(crate) fn ensure_rustls_provider() {}
 
 /// Typed async client for the core Zenodo REST API.
 #[derive(Clone, Debug)]

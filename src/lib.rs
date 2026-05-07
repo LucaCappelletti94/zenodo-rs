@@ -24,6 +24,24 @@
     )
 )]
 
+#[cfg(all(feature = "native-tls", feature = "rustls-ring-tls"))]
+compile_error!("features `native-tls` and `rustls-ring-tls` are mutually exclusive");
+
+#[cfg(all(feature = "native-tls", feature = "rustls-tls"))]
+compile_error!("features `native-tls` and `rustls-tls` are mutually exclusive");
+
+#[cfg(all(feature = "rustls-tls", feature = "rustls-ring-tls"))]
+compile_error!("features `rustls-tls` and `rustls-ring-tls` are mutually exclusive");
+
+#[cfg(all(feature = "native-tls", feature = "rustls-no-provider"))]
+compile_error!("features `native-tls` and `rustls-no-provider` are mutually exclusive");
+
+#[cfg(all(feature = "rustls-tls", feature = "rustls-no-provider"))]
+compile_error!("features `rustls-tls` and `rustls-no-provider` are mutually exclusive");
+
+#[cfg(all(feature = "rustls-no-provider", feature = "rustls-ring-tls"))]
+compile_error!("features `rustls-no-provider` and `rustls-ring-tls` are mutually exclusive");
+
 pub mod client;
 mod client_uploader_traits_impl;
 pub mod downloads;

@@ -872,6 +872,8 @@ mod tests {
 
     #[tokio::test]
     async fn retryable_error_treats_transport_errors_as_retryable() {
+        crate::client::ensure_rustls_provider();
+
         let error = reqwest::Client::new()
             .get("http://127.0.0.1:9")
             .send()

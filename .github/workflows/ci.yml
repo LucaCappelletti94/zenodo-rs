@@ -63,7 +63,7 @@ jobs:
       - name: Build docs
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --no-deps --all-features --locked
+        run: cargo doc --no-deps --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
 
   msrv:
     name: MSRV
@@ -82,11 +82,21 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Check crate with MSRV
-        run: cargo +1.86.0 check --all-features --locked
+        run: cargo +1.86.0 check --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
 
   clippy:
-    name: Clippy
+    name: Clippy (${{ matrix.name }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: rustls-ring
+            command: cargo clippy --all-targets --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
+          - name: rustls-aws-lc
+            command: cargo clippy --all-targets --no-default-features --features rustls-tls,checksums,indicatif --locked
+          - name: native-tls
+            command: cargo clippy --all-targets --no-default-features --features native-tls,checksums,indicatif --locked
 
     steps:
       - name: Checkout
@@ -101,7 +111,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run clippy
-        run: cargo clippy --all-targets --all-features --locked
+        run: ${{ matrix.command }}
 
   test:
     name: Test (${{ matrix.name }})
@@ -114,10 +124,14 @@ jobs:
             command: cargo test --locked
           - name: indicatif
             command: cargo test --features indicatif --locked
-          - name: all-features
-            command: cargo test --all-features --locked
+          - name: rustls-ring-checksums-indicatif
+            command: cargo test --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
+          - name: rustls-aws-lc-checksums-indicatif
+            command: cargo test --no-default-features --features rustls-tls,checksums,indicatif --locked
           - name: native-tls-checksums
             command: cargo test --no-default-features --features native-tls,checksums --locked
+          - name: rustls-no-provider-checksums
+            command: cargo check --no-default-features --features rustls-no-provider,checksums --locked
 
     steps:
       - name: Checkout
@@ -210,7 +224,7 @@ jobs:
         uses: taiki-e/install-action@cargo-tarpaulin
 
       - name: Check coverage
-        run: cargo tarpaulin --all-features --skip-clean --locked --fail-under 95 --out Stdout --out Xml
+        run: cargo tarpaulin --no-default-features --features rustls-ring-tls,checksums,indicatif --skip-clean --locked --fail-under 95 --out Stdout --out Xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5

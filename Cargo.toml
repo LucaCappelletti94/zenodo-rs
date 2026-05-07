@@ -1,6 +1,6 @@
 [package]
 name = "zenodo-rs"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 rust-version = "1.86"
 description = "Rust client for Zenodo deposition workflows, record retrieval, and artifact downloads."
@@ -11,14 +11,22 @@ keywords = ["zenodo", "doi", "publishing", "downloads"]
 categories = ["api-bindings", "science"]
 
 [package.metadata.docs.rs]
-all-features = true
+features = ["rustls-ring-tls", "checksums", "indicatif"]
+no-default-features = true
 
 [features]
-default = ["rustls-tls"]
+default = ["rustls-ring-tls"]
 checksums = ["dep:md-5", "dep:hex"]
 indicatif = ["dep:indicatif"]
 native-tls = ["reqwest/native-tls"]
 rustls-tls = ["reqwest/rustls"]
+rustls-ring-tls = [
+    "dep:rustls",
+    "reqwest/rustls-no-provider",
+    "rustls/ring",
+    "rustls/std",
+]
+rustls-no-provider = ["reqwest/rustls-no-provider"]
 
 [dependencies]
 bytes = "1.11.1"
@@ -27,17 +35,18 @@ chrono = { version = "0.4.44", features = ["serde"] }
 futures-core = "0.3.32"
 futures-util = "0.3.32"
 hex = { version = "0.4.3", optional = true }
-indicatif = { version = "0.17.11", optional = true }
+indicatif = { version = "0.18.4", optional = true }
 md-5 = { version = "0.11.0", optional = true }
 mime = "0.3.17"
 mime_guess = "2.0.5"
-reqwest = { version = "0.13.2", default-features = false, features = ["json", "query", "stream"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "stream"] }
+rustls = { version = "0.23", default-features = false, optional = true }
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tempfile = "3.27.0"
 thiserror = "2.0.18"
-tokio = { version = "1.52.1", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
+tokio = { version = "1.52.2", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1.18"
 tokio-util = { version = "0.7.18", features = ["io"] }
 url = { version = "2.5.8", features = ["serde"] }
