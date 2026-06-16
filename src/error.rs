@@ -79,6 +79,9 @@ pub enum ZenodoError {
         /// Description of the invalid state.
         String,
     ),
+    /// An operation required an API token but the client was built anonymously.
+    #[error("operation requires an API token but the client was built without one")]
+    MissingAuth,
     /// A required link relation was missing from a Zenodo payload.
     #[error("missing Zenodo link: {0}")]
     MissingLink(

@@ -111,6 +111,19 @@ impl MockZenodoServer {
             .expect("build test client")
     }
 
+    pub fn anonymous_client(&self) -> ZenodoClient {
+        ZenodoClient::anonymous_builder()
+            .endpoint(Endpoint::Custom(self.base_url.clone()))
+            .user_agent("zenodo-rs-tests/0.1")
+            .poll_options(PollOptions {
+                max_wait: Duration::from_millis(250),
+                initial_delay: Duration::from_millis(5),
+                max_delay: Duration::from_millis(10),
+            })
+            .build()
+            .expect("build anonymous test client")
+    }
+
     pub fn url(&self, path: &str) -> String {
         self.base_url
             .join(path.trim_start_matches('/'))

@@ -128,7 +128,7 @@ impl std::fmt::Debug for Auth {
 /// Builder for configuring a [`ZenodoClient`].
 #[derive(Clone, Debug)]
 pub struct ZenodoClientBuilder {
-    auth: Auth,
+    auth: Option<Auth>,
     endpoint: Endpoint,
     poll: PollOptions,
     user_agent: Option<String>,
@@ -310,7 +310,7 @@ pub(crate) fn ensure_rustls_provider() {}
 #[derive(Clone, Debug)]
 pub struct ZenodoClient {
     pub(crate) inner: reqwest::Client,
-    pub(crate) auth: Auth,
+    pub(crate) auth: Option<Auth>,
     pub(crate) endpoint: Endpoint,
     pub(crate) poll: PollOptions,
     pub(crate) request_timeout: Option<Duration>,
@@ -334,6 +334,31 @@ impl ZenodoClient {
     /// ```
     #[must_use]
     pub fn builder(auth: Auth) -> ZenodoClientBuilder {
+        Self::builder_with_auth(Some(auth))
+    }
+
+    /// Starts building a token-free client for Zenodo's public read surface.
+    ///
+    /// Anonymous clients reach record search, record and DOI lookup,
+    /// latest-version resolution, and public downloads without credentials.
+    /// Token-only operations (deposition, upload, publish) fail with
+    /// [`ZenodoError::MissingAuth`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zenodo_rs::ZenodoClient;
+    ///
+    /// let client = ZenodoClient::anonymous_builder().sandbox().build()?;
+    /// assert!(client.is_anonymous());
+    /// # Ok::<(), zenodo_rs::ZenodoError>(())
+    /// ```
+    #[must_use]
+    pub fn anonymous_builder() -> ZenodoClientBuilder {
+        Self::builder_with_auth(None)
+    }
+
+    fn builder_with_auth(auth: Option<Auth>) -> ZenodoClientBuilder {
         ZenodoClientBuilder {
             auth,
             endpoint: Endpoint::default(),
@@ -392,6 +417,40 @@ impl ZenodoClient {
         Self::builder(Auth::from_sandbox_env()?).sandbox().build()
     }
 
+    /// Builds an anonymous production client. See [`Self::anonymous_builder`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zenodo_rs::ZenodoClient;
+    ///
+    /// let client = ZenodoClient::anonymous()?;
+    /// assert!(client.is_anonymous());
+    /// # Ok::<(), zenodo_rs::ZenodoError>(())
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying HTTP client cannot be initialized.
+    pub fn anonymous() -> Result<Self, ZenodoError> {
+        Self::anonymous_builder().build()
+    }
+
+    /// Builds an anonymous sandbox client. See [`Self::anonymous_builder`].
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the underlying HTTP client cannot be initialized.
+    pub fn anonymous_sandbox() -> Result<Self, ZenodoError> {
+        Self::anonymous_builder().sandbox().build()
+    }
+
+    /// Returns `true` when the client was built without an API token.
+    #[must_use]
+    pub fn is_anonymous(&self) -> bool {
+        self.auth.is_none()
+    }
+
     /// Returns the configured API endpoint.
     #[must_use]
     pub fn endpoint(&self) -> &Endpoint {
@@ -432,15 +491,39 @@ impl ZenodoClient {
     ) -> Result<RequestBuilder, ZenodoError> {
         if !self.is_trusted_url(&url)? {
             return Err(ZenodoError::InvalidState(format!(
-                "refusing authenticated API request to different origin: {url}"
+                "refusing API request to different origin: {url}"
             )));
         }
 
-        Ok(self
+        let mut request = self
             .inner
             .request(method, url)
-            .bearer_auth(self.auth.token.expose_secret())
-            .header(ACCEPT, "application/json"))
+            .header(ACCEPT, "application/json");
+        if let Some(token) = self.bearer_token() {
+            request = request.bearer_auth(token);
+        }
+
+        Ok(request)
+    }
+
+    /// Builds a request to a relative API path that requires authentication.
+    pub(crate) fn authenticated_request(
+        &self,
+        method: Method,
+        path: &str,
+    ) -> Result<RequestBuilder, ZenodoError> {
+        self.require_auth()?;
+        self.request(method, path)
+    }
+
+    /// Builds a request to an absolute API URL that requires authentication.
+    pub(crate) fn authenticated_request_url(
+        &self,
+        method: Method,
+        url: Url,
+    ) -> Result<RequestBuilder, ZenodoError> {
+        self.require_auth()?;
+        self.request_url(method, url)
     }
 
     pub(crate) fn download_request_url(
@@ -451,10 +534,24 @@ impl ZenodoClient {
         let trusted = self.is_trusted_url(&url)?;
         let mut request = self.inner.request(method, url);
         if trusted {
-            request = request.bearer_auth(self.auth.token.expose_secret());
+            if let Some(token) = self.bearer_token() {
+                request = request.bearer_auth(token);
+            }
         }
 
         Ok(request)
+    }
+
+    fn bearer_token(&self) -> Option<&str> {
+        self.auth.as_ref().map(|auth| auth.token.expose_secret())
+    }
+
+    fn require_auth(&self) -> Result<(), ZenodoError> {
+        if self.auth.is_some() {
+            Ok(())
+        } else {
+            Err(ZenodoError::MissingAuth)
+        }
     }
 
     fn is_trusted_url(&self, url: &Url) -> Result<bool, ZenodoError> {
@@ -519,7 +616,7 @@ impl ZenodoClient {
     }
 
     pub(crate) async fn get_deposition_by_url(&self, url: &Url) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request_url(Method::GET, url.clone())?)
+        self.execute_json(self.authenticated_request_url(Method::GET, url.clone())?)
             .await
     }
 
@@ -539,7 +636,7 @@ impl ZenodoClient {
     /// response.
     pub async fn create_deposition(&self) -> Result<Deposition, ZenodoError> {
         self.execute_json(
-            self.request(Method::POST, "deposit/depositions")?
+            self.authenticated_request(Method::POST, "deposit/depositions")?
                 .json(&serde_json::json!({})),
         )
         .await
@@ -552,8 +649,10 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo returns a non-success
     /// response.
     pub async fn get_deposition(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.request(Method::GET, &format!("deposit/depositions/{id}"))?)
-            .await
+        self.execute_json(
+            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}"))?,
+        )
+        .await
     }
 
     /// Replaces the draft metadata for a deposition.
@@ -572,7 +671,7 @@ impl ZenodoClient {
         }
 
         self.execute_json(
-            self.request(Method::PUT, &format!("deposit/depositions/{id}"))?
+            self.authenticated_request(Method::PUT, &format!("deposit/depositions/{id}"))?
                 .json(&Payload { metadata }),
         )
         .await
@@ -585,8 +684,10 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo returns a non-success
     /// response.
     pub async fn list_files(&self, id: DepositionId) -> Result<Vec<DepositionFile>, ZenodoError> {
-        self.execute_json(self.request(Method::GET, &format!("deposit/depositions/{id}/files"))?)
-            .await
+        self.execute_json(
+            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}/files"))?,
+        )
+        .await
     }
 
     /// Deletes a file from a draft deposition.
@@ -599,7 +700,7 @@ impl ZenodoClient {
         id: DepositionId,
         file_id: DepositionFileId,
     ) -> Result<(), ZenodoError> {
-        self.execute_unit(self.request(
+        self.execute_unit(self.authenticated_request(
             Method::DELETE,
             &format!("deposit/depositions/{id}/files/{file_id}"),
         )?)
@@ -676,7 +777,7 @@ impl ZenodoClient {
 
         let uploaded = self
             .execute_json(
-                self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
+                self.authenticated_request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
                     .header(CONTENT_LENGTH, length)
                     .header(CONTENT_TYPE, content_type.as_ref())
                     .body(body),
@@ -738,7 +839,7 @@ impl ZenodoClient {
 
         let uploaded = self
             .execute_json(
-                self.request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
+                self.authenticated_request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
                     .header(CONTENT_LENGTH, content_length)
                     .header(CONTENT_TYPE, content_type.as_ref())
                     .body(body),
@@ -756,7 +857,7 @@ impl ZenodoClient {
     /// action.
     pub async fn publish(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
         self.execute_json_or_else(
-            self.request(
+            self.authenticated_request(
                 Method::POST,
                 &format!("deposit/depositions/{id}/actions/publish"),
             )?,
@@ -773,7 +874,7 @@ impl ZenodoClient {
     /// action.
     pub async fn edit(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
         self.execute_json_or_else(
-            self.request(
+            self.authenticated_request(
                 Method::POST,
                 &format!("deposit/depositions/{id}/actions/edit"),
             )?,
@@ -790,7 +891,7 @@ impl ZenodoClient {
     /// action.
     pub async fn discard(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
         self.execute_json_or_else(
-            self.request(
+            self.authenticated_request(
                 Method::POST,
                 &format!("deposit/depositions/{id}/actions/discard"),
             )?,
@@ -807,7 +908,7 @@ impl ZenodoClient {
     /// action.
     pub async fn new_version(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
         self.execute_json_or_else(
-            self.request(
+            self.authenticated_request(
                 Method::POST,
                 &format!("deposit/depositions/{id}/actions/newversion"),
             )?,
@@ -1073,6 +1174,103 @@ mod tests {
             super::sized_body_from_reader(Cursor::new(b"abc".to_vec()), 3, std::sync::Arc::new(()));
         drop(body);
         tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    #[test]
+    fn anonymous_clients_omit_bearer_auth_on_requests() {
+        use reqwest::header::AUTHORIZATION;
+
+        let client = ZenodoClient::anonymous().unwrap();
+        assert!(client.is_anonymous());
+        assert!(matches!(client.endpoint(), Endpoint::Production));
+
+        let request = client
+            .request(Method::GET, "records/1")
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(!request.headers().contains_key(AUTHORIZATION));
+
+        let download = client
+            .download_request_url(
+                Method::GET,
+                Url::parse("https://zenodo.org/api/files/bucket/file.bin").unwrap(),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        assert!(!download.headers().contains_key(AUTHORIZATION));
+    }
+
+    #[test]
+    fn authenticated_clients_attach_bearer_auth_on_requests() {
+        use reqwest::header::AUTHORIZATION;
+
+        let client = ZenodoClient::with_token("secret-token").unwrap();
+        assert!(!client.is_anonymous());
+
+        let request = client
+            .request(Method::GET, "records/1")
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.headers().get(AUTHORIZATION).unwrap(),
+            "Bearer secret-token"
+        );
+
+        let download = client
+            .download_request_url(
+                Method::GET,
+                Url::parse("https://zenodo.org/api/files/bucket/file.bin").unwrap(),
+            )
+            .unwrap()
+            .build()
+            .unwrap();
+        assert_eq!(
+            download.headers().get(AUTHORIZATION).unwrap(),
+            "Bearer secret-token"
+        );
+    }
+
+    #[test]
+    fn anonymous_builder_preserves_endpoint_selection() {
+        let client = ZenodoClient::anonymous_builder().sandbox().build().unwrap();
+        assert!(client.is_anonymous());
+        assert!(matches!(client.endpoint(), Endpoint::Sandbox));
+
+        let client = ZenodoClient::anonymous_sandbox().unwrap();
+        assert!(client.is_anonymous());
+        assert!(matches!(client.endpoint(), Endpoint::Sandbox));
+    }
+
+    #[tokio::test]
+    async fn authenticated_operations_reject_anonymous_clients() {
+        let client = ZenodoClient::anonymous().unwrap();
+
+        assert!(matches!(
+            client.create_deposition().await.unwrap_err(),
+            ZenodoError::MissingAuth
+        ));
+        assert!(matches!(
+            client
+                .get_deposition(crate::DepositionId(1))
+                .await
+                .unwrap_err(),
+            ZenodoError::MissingAuth
+        ));
+        let upload = tempfile::NamedTempFile::new().unwrap();
+        assert!(matches!(
+            client
+                .upload_path(
+                    &BucketUrl(Url::parse("https://zenodo.org/api/files/bucket").unwrap()),
+                    "artifact.bin",
+                    upload.path(),
+                )
+                .await
+                .unwrap_err(),
+            ZenodoError::MissingAuth
+        ));
     }
 
     #[tokio::test]

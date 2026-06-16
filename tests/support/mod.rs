@@ -43,6 +43,21 @@ pub fn live_client() -> ZenodoClient {
         .expect("build live sandbox client")
 }
 
+pub fn anonymous_live_client() -> ZenodoClient {
+    ZenodoClient::anonymous_builder()
+        .sandbox()
+        .user_agent("zenodo-rs-live-ci/0.1")
+        .request_timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(20))
+        .poll_options(PollOptions {
+            max_wait: Duration::from_secs(300),
+            initial_delay: Duration::from_secs(2),
+            max_delay: Duration::from_secs(15),
+        })
+        .build()
+        .expect("build anonymous live sandbox client")
+}
+
 pub fn required_env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("missing required environment variable {name}"))
 }
