@@ -49,7 +49,9 @@ impl ClientContext for ZenodoClient {
 
 impl MaybeAuthenticatedClient for ZenodoClient {
     fn has_auth(&self) -> bool {
-        !self.auth.token.expose_secret().is_empty()
+        self.auth
+            .as_ref()
+            .is_some_and(|auth| !auth.token.expose_secret().is_empty())
     }
 }
 
@@ -463,6 +465,8 @@ mod tests {
         let client = ZenodoClient::new(Auth::new("token")).unwrap();
 
         assert!(client.has_auth());
+        assert!(!ZenodoClient::anonymous().unwrap().has_auth());
+        assert!(!ZenodoClient::new(Auth::new("")).unwrap().has_auth());
         assert_eq!(ClientContext::request_timeout(&client), None);
         assert_eq!(ClientContext::connect_timeout(&client), None);
         assert_eq!(

@@ -53,6 +53,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Anonymous Read Example
+
+Zenodo's public read surface needs no token. Build a token-free client with `ZenodoClient::anonymous` (or `anonymous_sandbox`). Write flows then fail fast with `ZenodoError::MissingAuth`.
+
+```rust,no_run
+use zenodo_rs::ZenodoClient;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = ZenodoClient::anonymous()?;
+    let record = client.get_record_by_doi_str("10.5281/zenodo.123").await?;
+    let _ = record.id;
+
+    Ok(())
+}
+```
+
 ## Publish Example
 
 ```rust,no_run
@@ -86,6 +103,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `ZENODO_TOKEN` is the standard env var for the production service at [zenodo.org](https://zenodo.org/).
 - `ZENODO_SANDBOX_TOKEN` is the sandbox equivalent for [sandbox.zenodo.org](https://sandbox.zenodo.org/).
 - Write flows usually need `deposit:write` and `deposit:actions`.
+- Public read and download flows need no token at all. Use `ZenodoClient::anonymous` to skip authentication.
 
 ## Progress Bars
 

@@ -243,6 +243,48 @@ async fn client_sends_expected_headers_and_metadata_payload() {
 }
 
 #[tokio::test]
+async fn anonymous_client_reads_public_records_without_authorization() {
+    let server = MockZenodoServer::start().await;
+    let client = server.anonymous_client();
+    assert!(client.is_anonymous());
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/77",
+        StatusCode::OK,
+        record_json(&server, 77),
+    );
+
+    let record = client.get_record(RecordId(77)).await.expect("get record");
+    assert_eq!(record.id, RecordId(77));
+
+    let requests = server.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, Method::GET);
+    assert!(!requests[0].headers.contains_key("authorization"));
+    assert_eq!(
+        requests[0].headers.get("accept").map(String::as_str),
+        Some("application/json")
+    );
+}
+
+#[tokio::test]
+async fn anonymous_client_rejects_authenticated_operations_before_requesting() {
+    let server = MockZenodoServer::start().await;
+    let client = server.anonymous_client();
+
+    let error = client
+        .create_deposition()
+        .await
+        .expect_err("anonymous create must fail");
+    assert!(matches!(error, zenodo_rs::ZenodoError::MissingAuth));
+    assert!(
+        server.requests().is_empty(),
+        "anonymous client must not send authenticated requests"
+    );
+}
+
+#[tokio::test]
 async fn file_operations_use_expected_routes_and_headers() {
     let server = MockZenodoServer::start().await;
     let client = server.client();
