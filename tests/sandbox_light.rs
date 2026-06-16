@@ -15,9 +15,9 @@ use zenodo_rs::{
 };
 
 use crate::support::{
-    deposition_id_from_url, download_path, live_client, metadata, path_upload, reader_upload, step,
-    unique_suffix, wait_for_draft_deposition, wait_for_latest_by_doi,
-    wait_for_published_deposition,
+    anonymous_live_client, deposition_id_from_url, download_path, live_client, metadata,
+    path_upload, reader_upload, step, unique_suffix, wait_for_draft_deposition,
+    wait_for_latest_by_doi, wait_for_published_deposition,
 };
 
 #[tokio::test]
@@ -451,4 +451,51 @@ async fn daily_sandbox_workflow_and_read_api_surface() {
         .await
         .expect_err("missing files should surface as client errors");
     assert!(matches!(missing, ZenodoError::MissingFile { .. }));
+
+    let _step = step("exercise the anonymous read surface without a token");
+    let anon = anonymous_live_client();
+    assert!(anon.is_anonymous());
+
+    let anon_record = anon
+        .get_record(latest_record.id)
+        .await
+        .expect("anonymous get_record on a public record");
+    assert_eq!(anon_record.id, latest_record.id);
+
+    let anon_by_doi = anon
+        .get_record_by_doi_str(version_doi.as_str())
+        .await
+        .expect("anonymous DOI resolution through records search");
+    assert_eq!(anon_by_doi.id, first_record.id);
+
+    let anon_search = anon
+        .search_records(
+            &RecordQuery::builder()
+                .query(format!("recid:{}", latest_record.id.0))
+                .build(),
+        )
+        .await
+        .expect("anonymous record search");
+    assert!(
+        anon_search
+            .hits
+            .iter()
+            .any(|record| record.id == latest_record.id),
+        "anonymous search results should include the latest record"
+    );
+
+    let (_anon_dir, anon_path) = download_path("payload-anon.txt");
+    let anon_download = anon
+        .download_record_file_by_key_to_path(latest_record.id, "payload.txt", &anon_path)
+        .await
+        .expect("anonymous public file download");
+    assert_eq!(anon_download.resolved_record, latest_record.id);
+    let anon_payload = std::fs::read_to_string(&anon_path).expect("read anonymous download");
+    assert_eq!(anon_payload, format!("v2 {run_suffix}\n"));
+
+    let anon_write = anon
+        .create_deposition()
+        .await
+        .expect_err("anonymous clients must not be able to create depositions");
+    assert!(matches!(anon_write, ZenodoError::MissingAuth));
 }
