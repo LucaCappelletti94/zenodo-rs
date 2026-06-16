@@ -1,0 +1,50 @@
+# cargo-deny configuration. Run with `cargo deny check`.
+# Scoped to the default feature set (the recommended `rustls-ring-tls` TLS
+# path). Advisory coverage for the optional `native-tls` and `rustls-tls`
+# backends is handled separately by `cargo audit`, which scans the full
+# `Cargo.lock` regardless of feature selection.
+
+[graph]
+all-features = false
+no-default-features = false
+
+[output]
+feature-depth = 1
+
+[advisories]
+# Security advisories from the RustSec database. Vulnerabilities and yanked
+# crates fail the check by default. Add documented entries to `ignore` only
+# after assessing that an advisory does not affect this crate.
+ignore = []
+
+[licenses]
+# Permissive licenses only. Each entry below is required by at least one crate
+# in the default dependency tree. Crates offering an OR expression (for example
+# `MIT OR Apache-2.0`) are satisfied by any single allowed option, so weak
+# copyleft fallbacks such as LGPL never need to be granted here.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[bans]
+# Duplicate transitive versions are common and only worth a warning. Wildcard
+# version requirements are rejected outright as a supply-chain hygiene measure.
+multiple-versions = "warn"
+wildcards = "deny"
+allow = []
+deny = []
+
+[sources]
+# Only the public crates.io registry is trusted. No git or alternative
+# registry sources are expected in this dependency tree.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
