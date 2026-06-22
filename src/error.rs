@@ -25,7 +25,7 @@ pub struct FieldError {
 #[derive(Debug, Error)]
 pub enum ZenodoError {
     /// Zenodo returned a non-success HTTP status.
-    #[error("Zenodo returned HTTP {status}: {message:?}")]
+    #[error("{}", format_http_error(*.status, .message.as_deref(), .field_errors))]
     Http {
         /// HTTP status returned by Zenodo.
         status: StatusCode,
@@ -165,15 +165,19 @@ pub(crate) fn decode_http_error(
     body: &[u8],
 ) -> ZenodoError {
     let raw_body = trimmed_body(body);
-    let parsed = if looks_like_json(content_type, body) {
-        parse_json_error(body)
-    } else {
-        None
-    };
 
-    let (message, field_errors) = match parsed {
-        Some((message, field_errors)) => (message, field_errors),
-        None => (raw_body.clone(), Vec::new()),
+    let (message, field_errors) = if looks_like_json(content_type, body) {
+        match parse_json_error(body) {
+            Some((message, field_errors)) => (message, field_errors),
+            None => (raw_body.clone(), Vec::new()),
+        }
+    } else if is_html(content_type, body) {
+        // HTML error pages (gateway or maintenance pages) carry no useful prose
+        // on their first line, so prefer the document title and otherwise leave
+        // the message empty and rely on the status and hint.
+        (extract_html_title(body), Vec::new())
+    } else {
+        (raw_body.clone(), Vec::new())
     };
 
     ZenodoError::Http {
@@ -181,6 +185,86 @@ pub(crate) fn decode_http_error(
         message,
         field_errors,
         raw_body,
+    }
+}
+
+/// Renders a [`ZenodoError::Http`] into a single actionable line.
+fn format_http_error(
+    status: StatusCode,
+    message: Option<&str>,
+    field_errors: &[FieldError],
+) -> String {
+    let mut out = format!("Zenodo returned HTTP {status}");
+
+    if let Some(message) = message.map(str::trim).filter(|message| !message.is_empty()) {
+        out.push_str(": ");
+        out.push_str(message);
+    }
+
+    for field_error in field_errors {
+        out.push_str(" (");
+        if let Some(field) = &field_error.field {
+            out.push_str(field);
+            out.push_str(": ");
+        }
+        out.push_str(&field_error.message);
+        out.push(')');
+    }
+
+    if let Some(hint) = status_hint(status) {
+        out.push_str(". ");
+        out.push_str(hint);
+    }
+
+    out
+}
+
+/// Returns a short, actionable hint for well-known HTTP status classes.
+fn status_hint(status: StatusCode) -> Option<&'static str> {
+    match status {
+        StatusCode::UNAUTHORIZED => Some("Authentication failed, check the API token."),
+        StatusCode::FORBIDDEN => {
+            Some("Access is forbidden, the token may lack the required scope.")
+        }
+        StatusCode::NOT_FOUND => Some("The requested resource was not found."),
+        StatusCode::TOO_MANY_REQUESTS => Some("The client is being rate limited."),
+        _ if status.is_server_error() => {
+            Some("The service may be temporarily unavailable, which is usually transient.")
+        }
+        _ => None,
+    }
+}
+
+/// Returns `true` when the response body is an HTML document.
+fn is_html(content_type: Option<&str>, body: &[u8]) -> bool {
+    if content_type.is_some_and(|value| {
+        let value = value.trim_start();
+        value.starts_with("text/html") || value.starts_with("application/xhtml")
+    }) {
+        return true;
+    }
+
+    let start: String = body
+        .iter()
+        .copied()
+        .skip_while(u8::is_ascii_whitespace)
+        .take("<!doctype html".len())
+        .map(|byte| byte.to_ascii_lowercase() as char)
+        .collect();
+    start.starts_with("<!doctype html") || start.starts_with("<html")
+}
+
+/// Extracts the trimmed `<title>` text from an HTML body, when present.
+fn extract_html_title(body: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(body);
+    let lower = text.to_ascii_lowercase();
+    let start = lower.find("<title>")? + "<title>".len();
+    let end = start + lower[start..].find("</title>")?;
+    let title = text[start..end].trim();
+    if title.is_empty() {
+        None
+    } else {
+        Some(title.chars().take(200).collect())
     }
 }
 
@@ -301,6 +385,80 @@ mod tests {
             }
             other => panic!("unexpected error: {other:?}"),
         }
+    }
+
+    #[test]
+    fn html_error_bodies_use_title_and_avoid_raw_markup() {
+        let error = decode_http_error(
+            StatusCode::BAD_GATEWAY,
+            Some("text/html"),
+            b"<html><head><title>502 Bad Gateway</title></head><body><h1>oops</h1></body></html>",
+        );
+
+        match &error {
+            super::ZenodoError::Http { message, .. } => {
+                assert_eq!(message.as_deref(), Some("502 Bad Gateway"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        let rendered = error.to_string();
+        assert!(!rendered.contains("<html>"));
+        assert!(rendered.contains("502 Bad Gateway"));
+        assert!(rendered.contains("usually transient"));
+    }
+
+    #[test]
+    fn html_error_bodies_without_title_fall_back_to_status_and_hint() {
+        let error = decode_http_error(
+            StatusCode::BAD_GATEWAY,
+            None,
+            b"  <!DOCTYPE html>\n<html><body>upstream is down</body></html>",
+        );
+
+        match &error {
+            super::ZenodoError::Http { message, .. } => assert_eq!(*message, None),
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        assert_eq!(
+            error.to_string(),
+            "Zenodo returned HTTP 502 Bad Gateway. The service may be temporarily unavailable, which is usually transient."
+        );
+    }
+
+    #[test]
+    fn status_class_hints_are_appended_for_known_statuses() {
+        let unauthorized = decode_http_error(StatusCode::UNAUTHORIZED, Some("text/plain"), b"");
+        assert!(unauthorized.to_string().contains("check the API token"));
+
+        let forbidden = decode_http_error(StatusCode::FORBIDDEN, Some("text/plain"), b"");
+        assert!(forbidden.to_string().contains("lack the required scope"));
+
+        let not_found = decode_http_error(StatusCode::NOT_FOUND, Some("text/plain"), b"");
+        assert!(not_found.to_string().contains("was not found"));
+
+        let throttled = decode_http_error(
+            StatusCode::TOO_MANY_REQUESTS,
+            Some("text/plain"),
+            b"slow down",
+        );
+        let rendered = throttled.to_string();
+        assert!(rendered.contains("slow down"));
+        assert!(rendered.contains("rate limited"));
+    }
+
+    #[test]
+    fn json_field_errors_are_rendered_in_the_message() {
+        let error = decode_http_error(
+            StatusCode::BAD_REQUEST,
+            Some("application/json"),
+            br#"{"message":"bad metadata","errors":[{"field":"metadata.title","message":"required"}]}"#,
+        );
+        assert_eq!(
+            error.to_string(),
+            "Zenodo returned HTTP 400 Bad Request: bad metadata (metadata.title: required)"
+        );
     }
 
     #[test]
