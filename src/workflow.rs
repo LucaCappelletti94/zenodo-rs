@@ -645,15 +645,7 @@ impl ZenodoClient {
 }
 
 fn retryable_error(error: &ZenodoError) -> bool {
-    match error {
-        ZenodoError::Http { status, .. } => {
-            *status == reqwest::StatusCode::CONFLICT
-                || *status == reqwest::StatusCode::TOO_MANY_REQUESTS
-                || status.is_server_error()
-        }
-        ZenodoError::Transport(_) => true,
-        _ => false,
-    }
+    error.is_retryable()
 }
 
 #[cfg(test)]

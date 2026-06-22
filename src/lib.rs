@@ -55,6 +55,7 @@ pub mod pagination;
 pub mod poll;
 pub mod progress;
 pub mod records;
+pub mod retry;
 mod serde_util;
 pub mod upload;
 pub mod workflow;
@@ -85,4 +86,5 @@ pub use records::{
     ArtifactSelector, RecordQuery, RecordQueryBuilder, RecordQueryStatus, RecordSelector,
     RecordSort,
 };
+pub use retry::RetryOptions;
 pub use upload::{FileReplacePolicy, UploadSource, UploadSpec};

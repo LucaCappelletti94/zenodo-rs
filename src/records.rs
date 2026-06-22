@@ -564,9 +564,9 @@ impl ZenodoClient {
     /// search data.
     pub async fn search_records(&self, query: &RecordQuery) -> Result<Page<Record>, ZenodoError> {
         let pairs = query.clone().into_pairs();
-        self.execute_json::<SearchEnvelope<Record>>(
-            self.request(reqwest::Method::GET, "records")?.query(&pairs),
-        )
+        self.execute_json_with_retries::<SearchEnvelope<Record>, _>(|| {
+            Ok(self.request(reqwest::Method::GET, "records")?.query(&pairs))
+        })
         .await
         .map(Into::into)
     }
@@ -578,8 +578,10 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo returns a non-success
     /// response.
     pub async fn get_record(&self, id: RecordId) -> Result<Record, ZenodoError> {
-        self.execute_json(self.request(reqwest::Method::GET, &format!("records/{id}"))?)
-            .await
+        self.execute_json_with_retries(|| {
+            self.request(reqwest::Method::GET, &format!("records/{id}"))
+        })
+        .await
     }
 
     /// Resolves a DOI to a published record.
@@ -627,9 +629,9 @@ impl ZenodoClient {
                 break;
             };
             page = self
-                .execute_json::<SearchEnvelope<Record>>(
-                    self.request_url(reqwest::Method::GET, next)?,
-                )
+                .execute_json_with_retries::<SearchEnvelope<Record>, _>(|| {
+                    self.request_url(reqwest::Method::GET, next.clone())
+                })
                 .await?
                 .into();
         }
@@ -710,9 +712,9 @@ impl ZenodoClient {
         let record = self.get_record(id).await?;
         if let Some(versions_url) = record.links.versions.clone() {
             return self
-                .execute_json::<SearchEnvelope<Record>>(
-                    self.request_url(reqwest::Method::GET, versions_url)?,
-                )
+                .execute_json_with_retries::<SearchEnvelope<Record>, _>(|| {
+                    self.request_url(reqwest::Method::GET, versions_url.clone())
+                })
                 .await
                 .map(Into::into);
         }
