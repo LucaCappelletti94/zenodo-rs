@@ -308,7 +308,10 @@ impl CreatePublication for ZenodoClient {
             metadata,
             uploads,
         } = request;
-        ZenodoClient::create_and_publish_dataset(self, &metadata, uploads).await
+        Box::pin(ZenodoClient::create_and_publish_dataset(
+            self, &metadata, uploads,
+        ))
+        .await
     }
 }
 
@@ -334,8 +337,14 @@ impl UpdatePublication for ZenodoClient {
             policy,
             uploads,
         } = request;
-        ZenodoClient::publish_dataset_with_policy(self, resource_id, &metadata, policy, uploads)
-            .await
+        Box::pin(ZenodoClient::publish_dataset_with_policy(
+            self,
+            resource_id,
+            &metadata,
+            policy,
+            uploads,
+        ))
+        .await
     }
 }
 

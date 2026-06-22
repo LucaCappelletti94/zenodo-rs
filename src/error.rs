@@ -142,6 +142,25 @@ impl From<UploadNameValidationError> for ZenodoError {
 }
 
 impl ZenodoError {
+    /// Returns `true` when the error is likely transient and worth retrying.
+    ///
+    /// Retryable cases are HTTP `409 Conflict`, HTTP `429 Too Many Requests`,
+    /// any `5xx` server status, and transport-level failures. All other errors,
+    /// including the remaining `4xx` client errors and local I/O or
+    /// deserialization failures, are treated as terminal.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Http { status, .. } => {
+                *status == StatusCode::CONFLICT
+                    || *status == StatusCode::TOO_MANY_REQUESTS
+                    || status.is_server_error()
+            }
+            Self::Transport(_) => true,
+            _ => false,
+        }
+    }
+
     pub(crate) async fn from_response(response: Response) -> Self {
         let status = response.status();
         let content_type = response

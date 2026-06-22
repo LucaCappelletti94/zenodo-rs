@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 use url::Url;
-use zenodo_rs::{Auth, Endpoint, PollOptions, ZenodoClient};
+use zenodo_rs::{Auth, Endpoint, PollOptions, RetryOptions, ZenodoClient};
 
 #[derive(Clone, Debug)]
 pub struct CapturedRequest {
@@ -107,8 +107,25 @@ impl MockZenodoServer {
                 initial_delay: Duration::from_millis(5),
                 max_delay: Duration::from_millis(10),
             })
+            // Most tests enqueue exact response sequences, so retries would
+            // change request counts. Retry behavior is exercised explicitly via
+            // `client_with_retries`.
+            .retry_options(RetryOptions::disabled())
             .build()
             .expect("build test client")
+    }
+
+    pub fn client_with_retries(&self, max_retries: u32) -> ZenodoClient {
+        ZenodoClient::builder(Auth::new("test-token"))
+            .endpoint(Endpoint::Custom(self.base_url.clone()))
+            .user_agent("zenodo-rs-tests/0.1")
+            .retry_options(RetryOptions {
+                max_retries,
+                initial_delay: Duration::from_millis(1),
+                max_delay: Duration::from_millis(2),
+            })
+            .build()
+            .expect("build retrying test client")
     }
 
     pub fn anonymous_client(&self) -> ZenodoClient {
@@ -120,6 +137,7 @@ impl MockZenodoServer {
                 initial_delay: Duration::from_millis(5),
                 max_delay: Duration::from_millis(10),
             })
+            .retry_options(RetryOptions::disabled())
             .build()
             .expect("build anonymous test client")
     }

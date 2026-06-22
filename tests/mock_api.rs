@@ -3923,3 +3923,235 @@ async fn truncated_error_bodies_become_transport_errors() {
         .expect_err("truncated body should fail");
     assert!(matches!(error, ZenodoError::Transport(_)));
 }
+
+fn put_count(requests: &[crate::mock_support::CapturedRequest]) -> usize {
+    requests
+        .iter()
+        .filter(|request| request.method == Method::PUT)
+        .count()
+}
+
+#[tokio::test]
+async fn read_retries_recover_from_transient_server_errors() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+
+    server.enqueue_text(
+        Method::GET,
+        "/api/records/77",
+        StatusCode::BAD_GATEWAY,
+        "<html><title>502 Bad Gateway</title></html>",
+    );
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/77",
+        StatusCode::OK,
+        record_json(&server, 77),
+    );
+
+    let record = client
+        .get_record(RecordId(77))
+        .await
+        .expect("retry recovers the read");
+    assert_eq!(record.id, RecordId(77));
+    assert_eq!(server.requests().len(), 2);
+}
+
+#[tokio::test]
+async fn read_retries_exhaust_and_surface_the_last_error() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(2);
+
+    for _ in 0..3 {
+        server.enqueue_text(
+            Method::GET,
+            "/api/records/77",
+            StatusCode::SERVICE_UNAVAILABLE,
+            "down",
+        );
+    }
+
+    let error = client
+        .get_record(RecordId(77))
+        .await
+        .expect_err("retries are exhausted");
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::SERVICE_UNAVAILABLE
+    ));
+    assert_eq!(server.requests().len(), 3);
+}
+
+#[tokio::test]
+async fn non_retryable_status_is_attempted_once() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+
+    server.enqueue_text(
+        Method::GET,
+        "/api/records/77",
+        StatusCode::BAD_REQUEST,
+        "nope",
+    );
+
+    let error = client
+        .get_record(RecordId(77))
+        .await
+        .expect_err("client errors are not retried");
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::BAD_REQUEST
+    ));
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn non_idempotent_post_is_attempted_once() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+
+    server.enqueue_text(
+        Method::POST,
+        "/api/deposit/depositions",
+        StatusCode::BAD_GATEWAY,
+        "down",
+    );
+
+    let error = client
+        .create_deposition()
+        .await
+        .expect_err("deposition creation is not retried");
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::BAD_GATEWAY
+    ));
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn retries_disabled_attempt_each_operation_once() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    server.enqueue_text(
+        Method::GET,
+        "/api/records/77",
+        StatusCode::BAD_GATEWAY,
+        "down",
+    );
+
+    let error = client
+        .get_record(RecordId(77))
+        .await
+        .expect_err("disabled retries fail fast");
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::BAD_GATEWAY
+    ));
+    assert_eq!(server.requests().len(), 1);
+}
+
+#[tokio::test]
+async fn path_upload_retries_reopen_the_file() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+    let bucket: zenodo_rs::BucketUrl = server
+        .url("files/bucket-retry")
+        .parse::<url::Url>()
+        .expect("bucket url")
+        .into();
+
+    server.enqueue_text(
+        Method::PUT,
+        "/api/files/bucket-retry/artifact.bin",
+        StatusCode::BAD_GATEWAY,
+        "down",
+    );
+    server.enqueue_json(
+        Method::PUT,
+        "/api/files/bucket-retry/artifact.bin",
+        StatusCode::OK,
+        json!({ "key": "artifact.bin", "size": 5 }),
+    );
+
+    let temp = Builder::new().suffix(".bin").tempfile().expect("temp file");
+    std::fs::write(temp.path(), b"hello").expect("write temp file");
+
+    let uploaded = client
+        .upload_path(&bucket, "artifact.bin", temp.path())
+        .await
+        .expect("path upload retries");
+    assert_eq!(uploaded.key, "artifact.bin");
+    assert_eq!(put_count(&server.requests()), 2);
+}
+
+#[tokio::test]
+async fn reader_upload_is_attempted_once() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+    let bucket: zenodo_rs::BucketUrl = server
+        .url("files/bucket-reader")
+        .parse::<url::Url>()
+        .expect("bucket url")
+        .into();
+
+    server.enqueue_text(
+        Method::PUT,
+        "/api/files/bucket-reader/blob.bin",
+        StatusCode::BAD_GATEWAY,
+        "down",
+    );
+
+    let error = client
+        .upload_reader(
+            &bucket,
+            "blob.bin",
+            Cursor::new(b"hello".to_vec()),
+            5,
+            mime::APPLICATION_OCTET_STREAM,
+        )
+        .await
+        .expect_err("reader uploads are not retried");
+    assert!(matches!(
+        error,
+        ZenodoError::Http { status, .. } if status == StatusCode::BAD_GATEWAY
+    ));
+    assert_eq!(put_count(&server.requests()), 1);
+}
+
+#[tokio::test]
+async fn download_retries_recover_from_transient_server_errors() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client_with_retries(3);
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/40",
+        StatusCode::OK,
+        record_json(&server, 40),
+    );
+    server.enqueue_text(
+        Method::GET,
+        "/api/download/40/artifact.bin",
+        StatusCode::BAD_GATEWAY,
+        "down",
+    );
+    server.enqueue(
+        Method::GET,
+        "/api/download/40/artifact.bin",
+        QueuedResponse::bytes(
+            StatusCode::OK,
+            vec![("content-length".into(), "5".into())],
+            b"hello".to_vec(),
+        ),
+    );
+
+    let dir = tempdir().expect("temp dir");
+    let dest = dir.path().join("artifact.bin");
+    let resolved = client
+        .download_record_file_by_key_to_path(RecordId(40), "artifact.bin", &dest)
+        .await
+        .expect("download retries");
+    assert_eq!(resolved.bytes_written, 5);
+    assert_eq!(std::fs::read(&dest).expect("read download"), b"hello");
+}

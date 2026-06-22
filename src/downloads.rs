@@ -373,13 +373,20 @@ impl ZenodoClient {
         P: TransferProgress,
     {
         let resolved = self.resolve_artifact(selector).await?;
-        let bytes_written = write_stream_to_path_with_progress(
-            self.open_download_url(&resolved.url).await?,
-            destination,
-            resolved.checksum.as_deref(),
-            progress,
-        )
-        .await?;
+        // Each retry opens a fresh response and writes to a fresh temporary file
+        // with a fresh checksum validator. The resolve step above is a GET and is
+        // retried on its own.
+        let bytes_written = self
+            .retry(|| async {
+                write_stream_to_path_with_progress(
+                    self.open_download_url(&resolved.url).await?,
+                    destination,
+                    resolved.checksum.as_deref(),
+                    &progress,
+                )
+                .await
+            })
+            .await?;
 
         Ok(ResolvedDownload {
             requested: resolved.requested,
@@ -457,7 +464,7 @@ async fn write_stream_to_path_with_progress<P>(
     path: &Path,
     #[cfg(feature = "checksums")] expected_checksum: Option<&str>,
     #[cfg(not(feature = "checksums"))] _expected_checksum: Option<&str>,
-    progress: P,
+    progress: &P,
 ) -> Result<u64, ZenodoError>
 where
     P: TransferProgress,

@@ -36,6 +36,7 @@ use crate::metadata::DepositMetadataUpdate;
 use crate::model::{BucketObject, Deposition, DepositionFile};
 use crate::poll::PollOptions;
 use crate::progress::TransferProgress;
+use crate::retry::RetryOptions;
 
 /// Bearer-token authentication for Zenodo API requests.
 #[derive(Clone)]
@@ -131,6 +132,7 @@ pub struct ZenodoClientBuilder {
     auth: Option<Auth>,
     endpoint: Endpoint,
     poll: PollOptions,
+    retry: RetryOptions,
     user_agent: Option<String>,
     request_timeout: Option<Duration>,
     connect_timeout: Option<Duration>,
@@ -263,6 +265,30 @@ impl ZenodoClientBuilder {
         self
     }
 
+    /// Overrides the retry policy used for transient failures.
+    ///
+    /// Retries apply to idempotent operations: record reads, downloads, and
+    /// path-based uploads. They are on by default. Pass
+    /// [`RetryOptions::disabled`] to attempt each operation exactly once.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use zenodo_rs::{Auth, RetryOptions, ZenodoClient};
+    ///
+    /// let client = ZenodoClient::builder(Auth::new("token"))
+    ///     .retry_options(RetryOptions::disabled())
+    ///     .build()?;
+    ///
+    /// assert_eq!(client.retry_options().max_retries, 0);
+    /// # Ok::<(), zenodo_rs::ZenodoError>(())
+    /// ```
+    #[must_use]
+    pub fn retry_options(mut self, retry: RetryOptions) -> Self {
+        self.retry = retry;
+        self
+    }
+
     /// Builds a configured [`ZenodoClient`].
     ///
     /// # Errors
@@ -289,6 +315,7 @@ impl ZenodoClientBuilder {
             auth: self.auth,
             endpoint: self.endpoint,
             poll: self.poll,
+            retry: self.retry,
             request_timeout: self.request_timeout,
             connect_timeout: self.connect_timeout,
         })
@@ -313,6 +340,7 @@ pub struct ZenodoClient {
     pub(crate) auth: Option<Auth>,
     pub(crate) endpoint: Endpoint,
     pub(crate) poll: PollOptions,
+    pub(crate) retry: RetryOptions,
     pub(crate) request_timeout: Option<Duration>,
     pub(crate) connect_timeout: Option<Duration>,
 }
@@ -363,6 +391,7 @@ impl ZenodoClient {
             auth,
             endpoint: Endpoint::default(),
             poll: PollOptions::default(),
+            retry: RetryOptions::default(),
             user_agent: None,
             request_timeout: None,
             connect_timeout: None,
@@ -461,6 +490,12 @@ impl ZenodoClient {
     #[must_use]
     pub fn poll_options(&self) -> &PollOptions {
         &self.poll
+    }
+
+    /// Returns the configured retry behavior for transient failures.
+    #[must_use]
+    pub fn retry_options(&self) -> &RetryOptions {
+        &self.retry
     }
 
     /// Returns the configured overall HTTP request timeout.
@@ -571,6 +606,21 @@ impl ZenodoClient {
         Ok(serde_json::from_slice(&bytes)?)
     }
 
+    /// Sends a request built by `build`, decoding JSON, with transient-failure
+    /// retries.
+    ///
+    /// `build` is invoked on each attempt so the single-use [`RequestBuilder`]
+    /// is reconstructed before every send. Use this only for idempotent
+    /// operations, since a retried request is sent more than once.
+    pub(crate) async fn execute_json_with_retries<T, F>(&self, build: F) -> Result<T, ZenodoError>
+    where
+        T: DeserializeOwned,
+        F: Fn() -> Result<RequestBuilder, ZenodoError>,
+    {
+        self.retry(|| async { self.execute_json(build()?).await })
+            .await
+    }
+
     pub(crate) async fn execute_json_or_else<T, F, Fut>(
         &self,
         request: RequestBuilder,
@@ -616,7 +666,7 @@ impl ZenodoClient {
     }
 
     pub(crate) async fn get_deposition_by_url(&self, url: &Url) -> Result<Deposition, ZenodoError> {
-        self.execute_json(self.authenticated_request_url(Method::GET, url.clone())?)
+        self.execute_json_with_retries(|| self.authenticated_request_url(Method::GET, url.clone()))
             .await
     }
 
@@ -624,7 +674,7 @@ impl ZenodoClient {
         &self,
         url: &Url,
     ) -> Result<crate::model::Record, ZenodoError> {
-        self.execute_json(self.request_url(Method::GET, url.clone())?)
+        self.execute_json_with_retries(|| self.request_url(Method::GET, url.clone()))
             .await
     }
 
@@ -649,9 +699,9 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo returns a non-success
     /// response.
     pub async fn get_deposition(&self, id: DepositionId) -> Result<Deposition, ZenodoError> {
-        self.execute_json(
-            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}"))?,
-        )
+        self.execute_json_with_retries(|| {
+            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}"))
+        })
         .await
     }
 
@@ -684,9 +734,9 @@ impl ZenodoClient {
     /// Returns an error if the request fails or Zenodo returns a non-success
     /// response.
     pub async fn list_files(&self, id: DepositionId) -> Result<Vec<DepositionFile>, ZenodoError> {
-        self.execute_json(
-            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}/files"))?,
-        )
+        self.execute_json_with_retries(|| {
+            self.authenticated_request(Method::GET, &format!("deposit/depositions/{id}/files"))
+        })
         .await
     }
 
@@ -763,25 +813,33 @@ impl ZenodoClient {
     where
         P: TransferProgress + 'static,
     {
-        let file = File::open(path).await?;
-        let length = file.metadata().await?.len();
+        let upload_url = bucket_upload_url(bucket, filename)?;
         let progress = Arc::new(progress);
-        progress.begin(Some(length));
-        let body_progress = Arc::clone(&progress);
-        let body = reqwest::Body::wrap_stream(ReaderStream::new(file).map(move |item| {
-            if let Ok(bytes) = &item {
-                body_progress.advance(bytes.len() as u64);
-            }
-            item
-        }));
 
+        // Each retry re-opens the file and rebuilds the single-use body. The
+        // progress sink is begun per attempt, which resets a bar to zero, the
+        // correct visual for a from-scratch retry.
         let uploaded = self
-            .execute_json(
-                self.authenticated_request_url(Method::PUT, bucket_upload_url(bucket, filename)?)?
-                    .header(CONTENT_LENGTH, length)
-                    .header(CONTENT_TYPE, content_type.as_ref())
-                    .body(body),
-            )
+            .retry(|| async {
+                let file = File::open(path).await?;
+                let length = file.metadata().await?.len();
+                progress.begin(Some(length));
+                let body_progress = Arc::clone(&progress);
+                let body = reqwest::Body::wrap_stream(ReaderStream::new(file).map(move |item| {
+                    if let Ok(bytes) = &item {
+                        body_progress.advance(bytes.len() as u64);
+                    }
+                    item
+                }));
+
+                self.execute_json(
+                    self.authenticated_request_url(Method::PUT, upload_url.clone())?
+                        .header(CONTENT_LENGTH, length)
+                        .header(CONTENT_TYPE, content_type.as_ref())
+                        .body(body),
+                )
+                .await
+            })
             .await?;
         progress.finish();
         Ok(uploaded)
@@ -789,7 +847,9 @@ impl ZenodoClient {
 
     /// Uploads data from a blocking reader to a Zenodo bucket.
     ///
-    /// The caller must provide the exact content length.
+    /// The caller must provide the exact content length. Unlike path-based
+    /// uploads, reader uploads are not retried on transient failures, because a
+    /// consumed reader cannot be replayed.
     ///
     /// # Errors
     ///
@@ -815,6 +875,8 @@ impl ZenodoClient {
     /// The caller must provide the exact content length. The supplied progress
     /// sink receives the fixed upload size before the transfer starts and one
     /// `advance` event per chunk that is accepted by the request body stream.
+    /// Reader uploads are not retried on transient failures, because a consumed
+    /// reader cannot be replayed.
     ///
     /// # Errors
     ///
