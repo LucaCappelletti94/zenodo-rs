@@ -15,7 +15,7 @@ concurrency:
 jobs:
   feature-matrix:
     name: Feature Matrix (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -46,7 +46,7 @@ jobs:
 
   sandbox-live:
     name: Sandbox Full Smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     needs: feature-matrix
     timeout-minutes: 45
     environment: zenodo-sandbox
