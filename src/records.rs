@@ -4,7 +4,7 @@
 //!
 //! - [`RecordQuery`] and [`RecordQueryBuilder`] for search
 //! - [`RecordSelector`] for choosing a record by ID or DOI
-//! - [`ArtifactSelector`] for naming a downloadable file or archive
+//! - [`ArtifactSelector`] for naming a downloadable file
 //!
 //! Most consumers start here for DOI lookup, latest-version resolution, and
 //! artifact-oriented read flows.
@@ -94,13 +94,6 @@ pub enum ArtifactSelector {
         /// Whether to resolve the latest version first.
         latest: bool,
     },
-    /// Select the record archive.
-    Archive {
-        /// Record or DOI selector.
-        record: RecordSelector,
-        /// Whether to resolve the latest version first.
-        latest: bool,
-    },
 }
 
 impl ArtifactSelector {
@@ -163,42 +156,6 @@ impl ArtifactSelector {
         key: impl Into<String>,
     ) -> Result<Self, DoiError> {
         Ok(Self::latest_file(RecordSelector::doi(doi)?, key))
-    }
-
-    /// Selects the archive for a specific record or DOI.
-    #[must_use]
-    pub fn archive(record: impl Into<RecordSelector>) -> Self {
-        Self::Archive {
-            record: record.into(),
-            latest: false,
-        }
-    }
-
-    /// Selects the archive for the latest version of a record or DOI.
-    #[must_use]
-    pub fn latest_archive(record: impl Into<RecordSelector>) -> Self {
-        Self::Archive {
-            record: record.into(),
-            latest: true,
-        }
-    }
-
-    /// Selects the archive for a DOI string.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the DOI string is invalid.
-    pub fn archive_by_doi(doi: impl AsRef<str>) -> Result<Self, DoiError> {
-        Ok(Self::archive(RecordSelector::doi(doi)?))
-    }
-
-    /// Selects the archive for the latest version resolved from a DOI string.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the DOI string is invalid.
-    pub fn latest_archive_by_doi(doi: impl AsRef<str>) -> Result<Self, DoiError> {
-        Ok(Self::latest_archive(RecordSelector::doi(doi)?))
     }
 }
 
@@ -918,13 +875,6 @@ mod tests {
             }
         );
         assert_eq!(
-            ArtifactSelector::latest_archive_by_doi("10.5281/zenodo.1").unwrap(),
-            ArtifactSelector::Archive {
-                record: RecordSelector::Doi(Doi::new("10.5281/zenodo.1").unwrap()),
-                latest: true,
-            }
-        );
-        assert_eq!(
             ArtifactSelector::latest_file_by_doi("10.5281/zenodo.1", "artifact.bin").unwrap(),
             ArtifactSelector::FileByKey {
                 record: RecordSelector::Doi(Doi::new("10.5281/zenodo.1").unwrap()),
@@ -937,27 +887,6 @@ mod tests {
             ArtifactSelector::FileByKey {
                 record: RecordSelector::Doi(Doi::new("10.5281/zenodo.1").unwrap()),
                 key: "artifact.bin".into(),
-                latest: false,
-            }
-        );
-        assert_eq!(
-            ArtifactSelector::archive(RecordId(9)),
-            ArtifactSelector::Archive {
-                record: RecordSelector::RecordId(RecordId(9)),
-                latest: false,
-            }
-        );
-        assert_eq!(
-            ArtifactSelector::latest_archive(RecordId(9)),
-            ArtifactSelector::Archive {
-                record: RecordSelector::RecordId(RecordId(9)),
-                latest: true,
-            }
-        );
-        assert_eq!(
-            ArtifactSelector::archive_by_doi("10.5281/zenodo.1").unwrap(),
-            ArtifactSelector::Archive {
-                record: RecordSelector::Doi(Doi::new("10.5281/zenodo.1").unwrap()),
                 latest: false,
             }
         );

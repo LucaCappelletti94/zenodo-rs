@@ -30,7 +30,7 @@ output shows which live phase failed.
 - republish
 - record and DOI lookup
 - latest-version resolution
-- file and archive downloads
+- file downloads
 
 ## GitHub setup
 

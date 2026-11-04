@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "zenodo-rs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "bytes",
