@@ -608,7 +608,7 @@ impl RecordDateBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if the required `date` field is missing.
+    /// Returns an error if both the start and end fields are empty.
     pub fn build(self) -> Result<RecordDate, MetadataEntryBuildError> {
         if self.start.is_none() && self.end.is_none() {
             return Err(MetadataEntryBuildError::MissingField { entry: "RecordDate", field: "start or end" })

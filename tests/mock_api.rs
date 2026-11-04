@@ -4066,3 +4066,47 @@ async fn download_retries_recover_from_transient_server_errors() {
     assert_eq!(resolved.bytes_written, 5);
     assert_eq!(std::fs::read(&dest).expect("read download"), b"hello");
 }
+
+
+    #[tokio::test]
+    #[ignore = "requires live Zenodo API"]
+    async fn live_search_deserializes_many_records() -> Result<(), ZenodoError> {
+        let client = ZenodoClient::anonymous()?;
+
+        for page_number in 1..=10 {
+            let query = RecordQuery::builder()
+                .published()
+                .most_recent()
+                .page(page_number)
+                .size(20)
+                .build();
+
+            let page = client.search_records(&query).await?;
+
+            assert!(!page.hits.is_empty());
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    #[ignore = "requires live Zenodo API"]
+    async fn live_smiles_search_deserializes_records() -> Result<(), ZenodoError> {
+        let client = ZenodoClient::anonymous()?;
+
+        for page_number in 1..=10 {
+            let query = RecordQuery::builder()
+                .query("smiles")
+                .published()
+                .most_recent()
+                .page(page_number)
+                .size(20)
+                .build();
+
+            let page = client.search_records(&query).await?;
+
+            assert!(!page.hits.is_empty());
+        }
+
+        Ok(())
+    }
