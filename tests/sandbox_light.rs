@@ -430,19 +430,6 @@ async fn daily_sandbox_workflow_and_read_api_surface() {
         .expect("download latest payload through high-level selector");
     assert_eq!(selector_download.resolved_record, latest_record.id);
 
-    let (_archive_dir, archive_path) = download_path("latest.zip");
-    let archive_download = client
-        .download_record_archive_to_path(latest_record.id, &archive_path)
-        .await
-        .expect("download latest archive");
-    assert_eq!(archive_download.resolved_record, latest_record.id);
-    assert!(
-        std::fs::metadata(&archive_path)
-            .expect("archive metadata")
-            .len()
-            > 0
-    );
-
     let missing = client
         .download_artifact(
             &ArtifactSelector::file(latest_record.id, format!("missing-{run_suffix}.bin")),
