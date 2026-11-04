@@ -201,7 +201,7 @@ mod tests {
             serde_json::from_value::<U64Holder>(serde_json::json!({ "value": -1 })).unwrap_err();
 
         assert!(fractional.to_string().contains("integer-like"));
-        assert!(!negative.to_string().is_empty());
+        assert!(negative.to_string().contains("too small"));
     }
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
             serde_json::from_value::<StringHolder>(serde_json::json!({ "value": 1.5 }))
                 .unwrap_err();
 
-        assert!(!negative.to_string().is_empty());
+        assert!(negative.to_string().contains("too small"));
         assert!(fractional.to_string().contains("integer-like"));
     }
 
