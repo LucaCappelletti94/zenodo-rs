@@ -301,9 +301,6 @@ pub struct RecordLinks {
     /// URL for the record's files listing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub files: Option<Url>,
-    /// URL for downloading the record archive.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub archive: Option<Url>,
     /// DOI URL, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub doi: Option<Url>,
@@ -532,12 +529,6 @@ impl Record {
     #[must_use]
     pub fn latest_url(&self) -> Option<&Url> {
         self.links.latest.as_ref()
-    }
-
-    /// Returns the record archive link, when present.
-    #[must_use]
-    pub fn archive_url(&self) -> Option<&Url> {
-        self.links.archive.as_ref()
     }
 
     /// Finds a file by exact key.
@@ -917,7 +908,6 @@ mod tests {
         assert!(deposition.bucket_url().is_some());
         assert!(matches!(deposition.status.state, DepositState::Unknown(_)));
         assert!(record.latest_url().is_none());
-        assert!(record.archive_url().is_none());
     }
 
     #[test]

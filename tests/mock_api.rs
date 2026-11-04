@@ -110,8 +110,7 @@ fn record_json(server: &MockZenodoServer, id: u64) -> serde_json::Value {
             }
         ],
         "links": {
-            "self": server.url(&format!("records/{id}")),
-            "archive": server.url(&format!("download/{id}/archive.zip"))
+            "self": server.url(&format!("records/{id}"))
         }
     })
 }
@@ -715,7 +714,6 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("artifact.bin");
     let latest_path = dir.path().join("latest.bin");
-    let archive_path = dir.path().join("archive.zip");
 
     server.enqueue_json(
         Method::GET,
@@ -765,10 +763,7 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
                 "links": {
                     "self": server.url("download/41/artifact.bin")
                 }
-            }],
-            "links": {
-                "archive": server.url("download/41/archive.zip")
-            }
+            }]
         }),
     );
     server.enqueue_json(
@@ -807,52 +802,7 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
                 "links": {
                     "self": server.url("download/41/artifact.bin")
                 }
-            }],
-            "links": {
-                "archive": server.url("download/41/archive.zip")
-            }
-        }),
-    );
-    server.enqueue_json(
-        Method::GET,
-        "/api/records",
-        StatusCode::OK,
-        json!({
-            "hits": {
-                "hits": [json!({
-                    "id": 40,
-                    "recid": 40,
-                    "doi": "10.5281/zenodo.40",
-                    "metadata": { "title": "By DOI" },
-                    "files": [],
-                    "links": { "latest": server.url("records/41") }
-                })],
-                "total": 1
-            },
-            "links": {}
-        }),
-    );
-    server.enqueue_json(
-        Method::GET,
-        "/api/records/41",
-        StatusCode::OK,
-        json!({
-            "id": 41,
-            "recid": 41,
-            "doi": "10.5281/zenodo.41",
-            "metadata": { "title": "Latest DOI record" },
-            "files": [{
-                "id": "f-41",
-                "key": "artifact.bin",
-                "size": 5,
-                "checksum": "md5:7d793037a0760186574b0282f2f435e7",
-                "links": {
-                    "self": server.url("download/41/artifact.bin")
-                }
-            }],
-            "links": {
-                "archive": server.url("download/41/archive.zip")
-            }
+            }]
         }),
     );
     server.enqueue(
@@ -875,11 +825,6 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
         Method::GET,
         "/api/download/41/artifact.bin",
         QueuedResponse::bytes(StatusCode::OK, vec![], b"world".to_vec()),
-    );
-    server.enqueue(
-        Method::GET,
-        "/api/download/41/archive.zip",
-        QueuedResponse::bytes(StatusCode::OK, vec![], b"zip!".to_vec()),
     );
 
     let info = client
@@ -913,7 +858,7 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
     assert_eq!(
         resolved.requested,
         ArtifactSelector::FileByKey {
-            record: RecordSelector::Doi(doi.clone()),
+            record: RecordSelector::Doi(doi),
             key: "artifact.bin".into(),
             latest: true,
         }
@@ -922,19 +867,6 @@ async fn doi_and_artifact_helpers_resolve_latest_and_download_files() {
         std::fs::read(&latest_path).expect("read latest file"),
         b"world"
     );
-
-    let archive = client
-        .download_artifact(
-            &ArtifactSelector::Archive {
-                record: RecordSelector::Doi(doi),
-                latest: true,
-            },
-            &archive_path,
-        )
-        .await
-        .expect("download archive");
-    assert_eq!(archive.bytes_written, 4);
-    assert_eq!(std::fs::read(&archive_path).expect("read archive"), b"zip!");
 }
 
 #[tokio::test]
@@ -3387,10 +3319,7 @@ async fn download_helpers_cover_remaining_branches() {
             "size": 5,
             "links": { "self": server.url("download/110/artifact.bin") }
         }],
-        "links": {
-            "latest": server.url("records/111"),
-            "archive": server.url("download/110/archive.zip")
-        }
+        "links": { "latest": server.url("records/111") }
     });
     let record_111 = json!({
         "id": 111,
@@ -3403,9 +3332,7 @@ async fn download_helpers_cover_remaining_branches() {
             "size": 7,
             "links": { "self": server.url("download/111/artifact.bin") }
         }],
-        "links": {
-            "archive": server.url("download/111/archive.zip")
-        }
+        "links": {}
     });
 
     server.enqueue_json(
@@ -3424,18 +3351,6 @@ async fn download_helpers_cover_remaining_branches() {
         Method::GET,
         "/api/download/111/artifact.bin",
         QueuedResponse::bytes(StatusCode::OK, vec![], b"latest!".to_vec()),
-    );
-
-    server.enqueue_json(
-        Method::GET,
-        "/api/records/110",
-        StatusCode::OK,
-        record_110.clone(),
-    );
-    server.enqueue(
-        Method::GET,
-        "/api/download/110/archive.zip",
-        QueuedResponse::bytes(StatusCode::OK, vec![], b"archive".to_vec()),
     );
 
     server.enqueue_json(
@@ -3461,7 +3376,6 @@ async fn download_helpers_cover_remaining_branches() {
     );
 
     let latest_path = dir.path().join("latest.bin");
-    let archive_path = dir.path().join("archive.zip");
     let doi_path = dir.path().join("doi-v1.bin");
     let selector_path = dir.path().join("selector.bin");
 
@@ -3474,13 +3388,6 @@ async fn download_helpers_cover_remaining_branches() {
         std::fs::read(&latest_path).expect("latest file"),
         b"latest!"
     );
-
-    let archive = client
-        .download_record_archive_to_path(RecordId(110), &archive_path)
-        .await
-        .expect("record archive");
-    assert_eq!(archive.resolved_record, RecordId(110));
-    assert_eq!(std::fs::read(&archive_path).expect("archive"), b"archive");
 
     let doi = Doi::new("10.5281/zenodo.110").expect("doi");
     let resolved = client
@@ -3501,7 +3408,7 @@ async fn download_helpers_cover_remaining_branches() {
         )
         .await
         .expect("selector download");
-    assert_eq!(selected.resolved_key.as_deref(), Some("artifact.bin"));
+    assert_eq!(selected.resolved_key, "artifact.bin");
     assert_eq!(
         std::fs::read(&selector_path).expect("selector file"),
         b"selector"
@@ -3792,18 +3699,22 @@ async fn mocked_download_errors_cover_missing_file_and_missing_links() {
         json!({
             "id": 411,
             "recid": 411,
-            "metadata": { "title": "No archive" },
-            "files": [],
+            "metadata": { "title": "No download link" },
+            "files": [{ "id": "f-411", "key": "artifact.bin", "size": 5, "links": {} }],
             "links": {}
         }),
     );
-    let missing_archive = client
-        .download_record_archive_to_path(RecordId(411), &dir.path().join("archive.zip"))
+    let missing_link = client
+        .download_record_file_by_key_to_path(
+            RecordId(411),
+            "artifact.bin",
+            &dir.path().join("unlinked.bin"),
+        )
         .await
-        .expect_err("missing archive should fail");
+        .expect_err("file without a download link should fail");
     assert!(matches!(
-        missing_archive,
-        ZenodoError::MissingLink("archive")
+        missing_link,
+        ZenodoError::MissingLink("record_file.links.self")
     ));
 }
 

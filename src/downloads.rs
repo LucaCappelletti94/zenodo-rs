@@ -1,4 +1,4 @@
-//! Download helpers for record files and archives.
+//! Download helpers for record files.
 //!
 //! Use this module when you already know which published record or DOI you want
 //! to consume and need either:
@@ -49,8 +49,8 @@ pub struct ResolvedDownload {
     pub resolved_record: RecordId,
     /// The DOI on the resolved record, when present.
     pub resolved_doi: Option<Doi>,
-    /// The resolved file key for file downloads.
-    pub resolved_key: Option<String>,
+    /// The resolved file key.
+    pub resolved_key: String,
     /// Number of bytes written to the destination path.
     pub bytes_written: u64,
     /// Checksum reported by Zenodo for the resolved file, when present.
@@ -61,7 +61,7 @@ pub struct ResolvedDownload {
 struct ResolvedArtifact {
     requested: ArtifactSelector,
     resolved_record: Record,
-    resolved_key: Option<String>,
+    resolved_key: String,
     checksum: Option<String>,
     url: Url,
 }
@@ -223,53 +223,6 @@ impl ZenodoClient {
         .await
     }
 
-    /// Downloads the archive for a specific record to a local path.
-    ///
-    /// Returns resolution metadata describing the record that produced the
-    /// archive bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the record lookup fails, if the archive link is
-    /// missing, or if writing the destination path fails.
-    pub async fn download_record_archive_to_path(
-        &self,
-        id: RecordId,
-        path: &Path,
-    ) -> Result<ResolvedDownload, ZenodoError> {
-        self.download_record_archive_to_path_with_progress(id, path, ())
-            .await
-    }
-
-    /// Downloads the archive for a specific record to a local path while reporting progress.
-    ///
-    /// Returns resolution metadata describing the record that produced the
-    /// archive bytes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the record lookup fails, if the archive link is
-    /// missing, or if writing the destination path fails.
-    pub async fn download_record_archive_to_path_with_progress<P>(
-        &self,
-        id: RecordId,
-        path: &Path,
-        progress: P,
-    ) -> Result<ResolvedDownload, ZenodoError>
-    where
-        P: TransferProgress,
-    {
-        self.download_artifact_with_progress(
-            &ArtifactSelector::Archive {
-                record: RecordSelector::RecordId(id),
-                latest: false,
-            },
-            path,
-            progress,
-        )
-        .await
-    }
-
     /// Downloads a named file after resolving a DOI to a record.
     ///
     /// # Errors
@@ -329,8 +282,8 @@ impl ZenodoClient {
     ///     let client = ZenodoClient::new(Auth::new("token"))?;
     ///     let resolved = client
     ///         .download_artifact(
-    ///             &ArtifactSelector::latest_archive_by_doi("10.5281/zenodo.123")?,
-    ///             Path::new("record.zip"),
+    ///             &ArtifactSelector::latest_file_by_doi("10.5281/zenodo.123", "artifact.tar.gz")?,
+    ///             Path::new("artifact.tar.gz"),
     ///         )
     ///         .await?;
     ///     let _ = resolved.bytes_written;
@@ -435,23 +388,8 @@ impl ZenodoClient {
                 Ok(ResolvedArtifact {
                     requested: selector.clone(),
                     resolved_record,
-                    resolved_key: Some(file.key),
+                    resolved_key: file.key,
                     checksum: file.checksum,
-                    url,
-                })
-            }
-            ArtifactSelector::Archive { record, latest } => {
-                let resolved_record = self.resolve_record_for_download(record, *latest).await?;
-                let url = resolved_record
-                    .archive_url()
-                    .cloned()
-                    .ok_or(ZenodoError::MissingLink("archive"))?;
-
-                Ok(ResolvedArtifact {
-                    requested: selector.clone(),
-                    resolved_record,
-                    resolved_key: None,
-                    checksum: None,
                     url,
                 })
             }
@@ -590,18 +528,11 @@ mod tests {
                     "size": 10,
                     "links": { "self": "https://zenodo.org/api/files/1" }
                 }
-            ],
-            "links": {
-                "archive": "https://zenodo.org/api/records/42/files-archive"
-            }
+            ]
         }))
         .unwrap();
 
         assert_eq!(record.file_by_key("bundle.tar.gz").unwrap().id, "abc");
-        assert_eq!(
-            record.archive_url().unwrap().as_str(),
-            "https://zenodo.org/api/records/42/files-archive"
-        );
     }
 
     #[cfg(feature = "checksums")]

@@ -14,7 +14,7 @@ permissions:
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -26,14 +26,14 @@ jobs:
           components: rustfmt
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check formatting
         run: cargo fmt --all --check
 
   links:
     name: Links
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -49,7 +49,7 @@ jobs:
 
   docs:
     name: Docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -59,7 +59,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Build docs
         env:
@@ -68,7 +68,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -80,14 +80,14 @@ jobs:
           toolchain: 1.86.0
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Check crate with MSRV
         run: cargo +1.86.0 check --no-default-features --features rustls-ring-tls,checksums,indicatif --locked
 
   clippy:
     name: Clippy (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -109,14 +109,14 @@ jobs:
           components: clippy
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Run clippy
         run: ${{ matrix.command }}
 
   test:
     name: Test (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       fail-fast: false
       matrix:
@@ -142,14 +142,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Run tests
         run: ${{ matrix.command }}
 
   package:
     name: Package
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -159,14 +159,14 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Verify publish package
         run: cargo publish --dry-run --locked
 
   semver:
     name: Semver
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -176,7 +176,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install cargo-semver-checks
         uses: taiki-e/install-action@cargo-semver-checks
@@ -186,7 +186,7 @@ jobs:
 
   audit:
     name: Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -196,7 +196,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
@@ -206,7 +206,7 @@ jobs:
 
   deny:
     name: Deny
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout
@@ -216,7 +216,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install cargo-deny
         uses: taiki-e/install-action@cargo-deny
@@ -226,7 +226,7 @@ jobs:
 
   coverage:
     name: Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -239,7 +239,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install cargo-tarpaulin
         uses: taiki-e/install-action@cargo-tarpaulin
@@ -248,7 +248,7 @@ jobs:
         run: cargo tarpaulin --no-default-features --features rustls-ring-tls,checksums,indicatif --skip-clean --locked --fail-under 95 --out Stdout --out Xml
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ./cobertura.xml
           disable_search: true

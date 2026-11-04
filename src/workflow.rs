@@ -767,12 +767,14 @@ mod tests {
         .unwrap();
 
         let uploaded = std::collections::BTreeSet::from(["one.txt".to_owned()]);
-        assert!(file_ids_to_delete(
-            FileReplacePolicy::KeepExistingAndAdd,
-            &deposition,
-            &uploaded
-        )
-        .is_empty());
+        assert_eq!(
+            file_ids_to_delete(
+                FileReplacePolicy::KeepExistingAndAdd,
+                &deposition,
+                &uploaded
+            ),
+            Vec::new()
+        );
     }
 
     #[test]

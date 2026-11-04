@@ -15,7 +15,7 @@ It covers deposition create/update/publish flows, safe draft reuse versus `newve
 - Use [`ZenodoClient`](https://docs.rs/zenodo-rs/latest/zenodo_rs/client/struct.ZenodoClient.html) for the main entrypoint.
 - Use [`workflow`](https://docs.rs/zenodo-rs/latest/zenodo_rs/workflow/index.html) for safe draft, publish, edit, and version helpers.
 - Use [`records`](https://docs.rs/zenodo-rs/latest/zenodo_rs/records/index.html) for published-record lookup, DOI resolution, and search.
-- Use [`downloads`](https://docs.rs/zenodo-rs/latest/zenodo_rs/downloads/index.html) for file and archive downloads.
+- Use [`downloads`](https://docs.rs/zenodo-rs/latest/zenodo_rs/downloads/index.html) for file downloads.
 - Use [`DepositMetadataUpdate`](https://docs.rs/zenodo-rs/latest/zenodo_rs/metadata/struct.DepositMetadataUpdate.html) and [`UploadSpec`](https://docs.rs/zenodo-rs/latest/zenodo_rs/upload/struct.UploadSpec.html) to describe what you want to publish.
 
 ## Install

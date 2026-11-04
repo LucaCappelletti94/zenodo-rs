@@ -1620,10 +1620,10 @@ mod tests {
             .build()
             .unwrap();
 
-        assert!(metadata.keywords.is_empty());
-        assert!(metadata.related_identifiers.is_empty());
-        assert!(metadata.communities.is_empty());
-        assert!(metadata.grants.is_empty());
+        assert_eq!(metadata.keywords, Vec::<String>::new());
+        assert_eq!(metadata.related_identifiers, Vec::new());
+        assert_eq!(metadata.communities, Vec::new());
+        assert_eq!(metadata.grants, Vec::new());
     }
 
     #[test]
@@ -2021,7 +2021,7 @@ mod tests {
 
         assert_eq!(upload, "\"dataset\"");
         assert_eq!(access, "\"open\"");
-        assert!(metadata.creators.is_empty());
+        assert_eq!(metadata.creators, Vec::new());
     }
 
     #[test]

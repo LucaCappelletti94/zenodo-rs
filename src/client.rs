@@ -1018,7 +1018,6 @@ where
                     if tx.blocking_send(Ok(Bytes::from(buf))).is_err() {
                         return;
                     }
-                    progress.advance(read as u64);
                 }
                 Err(error) => {
                     let _ = tx.blocking_send(Err(error));
@@ -1028,7 +1027,13 @@ where
         }
     });
 
-    reqwest::Body::wrap_stream(ReceiverStream::new(rx))
+    reqwest::Body::wrap_stream(ReceiverStream::new(rx).map(move |item| {
+        if let Ok(bytes) = &item {
+            // usize is at most 64 bits on every target reqwest supports.
+            progress.advance(bytes.len() as u64);
+        }
+        item
+    }))
 }
 
 #[cfg(test)]
