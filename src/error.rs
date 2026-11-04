@@ -604,7 +604,7 @@ mod tests {
     fn direct_error_helpers_cover_remaining_shapes() {
         let parsed = parse_json_error(br#"{"title":"title only"}"#).unwrap();
         assert_eq!(parsed.0.as_deref(), Some("title only"));
-        assert!(parsed.1.is_empty());
+        assert_eq!(parsed.1, Vec::new());
 
         let object_errors = parse_field_errors(&json!({
             "metadata.title": { "detail": "required" }
@@ -629,7 +629,7 @@ mod tests {
     #[test]
     fn field_error_parser_ignores_unknown_array_items() {
         let parsed = parse_field_errors(&json!([42, true, null])).unwrap();
-        assert!(parsed.is_empty());
+        assert_eq!(parsed, Vec::new());
     }
 
     #[test]
