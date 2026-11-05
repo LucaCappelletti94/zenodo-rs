@@ -1173,6 +1173,21 @@ pub struct DepositMetadataUpdate {
     pub extra: BTreeMap<String, Value>,
 }
 
+fn debug_date<'de, D>(deserializer: D) -> Result<Option<NaiveDate>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+
+    dbg!(&raw);
+
+    raw.map(|s| {
+        NaiveDate::parse_from_str(&s, "%Y-%m-%d")
+            .map_err(serde::de::Error::custom)
+    })
+    .transpose()
+}
+
 /// Errors raised while building [`DepositMetadataUpdate`] values.
 #[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum DepositMetadataBuildError {

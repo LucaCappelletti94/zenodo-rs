@@ -1046,7 +1046,7 @@ mod tests {
 
     use super::{bucket_upload_url, Auth, ZenodoClient};
     use crate::ids::BucketUrl;
-    use crate::{Endpoint, PollOptions, RecordId, RecordQuery, ZenodoError};
+    use crate::{Endpoint, PollOptions, RecordId, ZenodoError};
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::routing::get;

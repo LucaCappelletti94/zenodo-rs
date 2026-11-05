@@ -13,10 +13,7 @@
 mod mock_support;
 
 use client_uploader_traits::{
-    CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource,
-    DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource,
-    ResolveLatestPublicResourceByDoi, SearchPublicResources, UpdatePublication,
-    UpdatePublicationRequest,
+    CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource, DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource, ResolveLatestPublicResourceByDoi, SearchPublicResources, SearchResultsLike, UpdatePublication, UpdatePublicationRequest,
 };
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -29,7 +26,7 @@ use tempfile::{tempdir, Builder};
 use zenodo_rs::{
     AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi,
     Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordSelector, UploadSpec, UploadType,
-    ZenodoClient, ZenodoError,
+    ZenodoClient, ZenodoError, RecordQuery
 };
 
 use crate::mock_support::{MockZenodoServer, QueuedResponse};
@@ -4081,9 +4078,26 @@ async fn download_retries_recover_from_transient_server_errors() {
                 .size(20)
                 .build();
 
-            let page = client.search_records(&query).await?;
+            let page = client.search_records(&query).await.unwrap_or_else(|err| {
+    panic!(
+        "Failed to deserialize page {page_number}: {err:#?}"
+    )
+});
 
             assert!(!page.hits.is_empty());
+            for item in page.items() {
+                if let Some(pub_date) = &item.metadata.publication_date {
+                    
+                }
+                for date in &item.metadata.dates {
+                    if let Some(start) = &date.start {
+                        assert!(!start.trim().is_empty(), "Empty start date in record {}", item.id )
+                    };
+                    if let Some(end) = &date.end {
+                        assert!(!end.trim().is_empty(), "Empty end date in record {}", item.id)
+                    }
+                }
+            }
         }
 
         Ok(())
