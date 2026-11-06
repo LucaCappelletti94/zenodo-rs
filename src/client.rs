@@ -604,9 +604,7 @@ impl ZenodoClient {
 
         let url = response.url().to_string();
         let bytes = response.bytes().await?;
-        let result: T = decode_json(&bytes, &url)?;
-
-        Ok(result)
+        decode_json(&bytes, &url)
     }
 
     /// Sends a request built by `build`, decoding JSON, with transient-failure
@@ -644,9 +642,7 @@ impl ZenodoClient {
             return on_empty().await;
         }
 
-        let result: T = decode_json(&bytes, &url)?;
-
-        Ok(result)
+        decode_json(&bytes, &url)
     }
 
     pub(crate) async fn execute_unit(&self, request: RequestBuilder) -> Result<(), ZenodoError> {
@@ -993,7 +989,7 @@ fn decode_json<T: DeserializeOwned> (
 
     let result = serde_path_to_error::deserialize(&mut decoder).map_err(|error| ZenodoError::ResponseDecode { url: url.to_owned(), path: error.path().to_string(), source: error.into_inner() })?;
 
-    decoder.end()?;
+    decoder.end().map_err(|error| ZenodoError::ResponseDecode { url: url.to_owned(), path: "$".to_owned(), source: error })?;
     Ok(result)
 }
 
