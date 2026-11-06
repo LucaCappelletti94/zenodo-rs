@@ -500,9 +500,7 @@ impl<'de> Deserialize<'de> for Record {
     where
         D: Deserializer<'de>,
     {
-let wire: RecordWire =
-    serde_path_to_error::deserialize(deserializer)
-        .map_err(serde::de::Error::custom)?;
+let wire: RecordWire = RecordWire::deserialize(deserializer)?;
         Ok(Self {
             created: wire.created,
             modified: wire.modified.or(wire.updated),

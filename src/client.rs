@@ -602,8 +602,11 @@ impl ZenodoClient {
             return Err(ZenodoError::from_response(response).await);
         }
 
+        let url = response.url().to_string();
         let bytes = response.bytes().await?;
-        Ok(serde_json::from_slice(&bytes)?)
+        let result: T = decode_json(&bytes, &url)?;
+
+        Ok(result)
     }
 
     /// Sends a request built by `build`, decoding JSON, with transient-failure
@@ -635,13 +638,15 @@ impl ZenodoClient {
         if !response.status().is_success() {
             return Err(ZenodoError::from_response(response).await);
         }
-
+        let url = response.url().to_string();
         let bytes = response.bytes().await?;
         if bytes.is_empty() {
             return on_empty().await;
         }
 
-        Ok(serde_json::from_slice(&bytes)?)
+        let result: T = decode_json(&bytes, &url)?;
+
+        Ok(result)
     }
 
     pub(crate) async fn execute_unit(&self, request: RequestBuilder) -> Result<(), ZenodoError> {
@@ -978,6 +983,18 @@ impl ZenodoClient {
         )
         .await
     }
+}
+
+fn decode_json<T: DeserializeOwned> (
+    bytes: &[u8],
+    url: &str,
+) -> Result<T, ZenodoError> {
+    let mut decoder = serde_json::Deserializer::from_slice(bytes);
+
+    let result = serde_path_to_error::deserialize(&mut decoder).map_err(|error| ZenodoError::ResponseDecode { url: url.to_owned(), path: error.path().to_string(), source: error.into_inner() })?;
+
+    decoder.end()?;
+    Ok(result)
 }
 
 fn bucket_upload_url(bucket: &BucketUrl, filename: &str) -> Result<Url, ZenodoError> {
