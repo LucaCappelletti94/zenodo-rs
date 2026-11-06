@@ -15,7 +15,7 @@ mod mock_support;
 use client_uploader_traits::{
     CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource,
     DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource,
-    ResolveLatestPublicResourceByDoi, SearchPublicResources, UpdatePublication,
+    ResolveLatestPublicResourceByDoi, SearchPublicResources, SearchResultsLike, UpdatePublication,
     UpdatePublicationRequest,
 };
 use std::collections::BTreeMap;
@@ -27,9 +27,9 @@ use axum::http::{Method, StatusCode};
 use serde_json::json;
 use tempfile::{tempdir, Builder};
 use zenodo_rs::{
-    AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi,
-    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordSelector, UploadSpec, UploadType,
-    ZenodoClient, ZenodoError,
+    AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi, metadata::PublicationDate,
+    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordQuery, RecordSelector, UploadSpec,
+    UploadType, ZenodoClient, ZenodoError,
 };
 
 use crate::mock_support::{MockZenodoServer, QueuedResponse};
@@ -3565,7 +3565,7 @@ async fn workflow_error_paths_and_reader_uploads_are_exercised() {
 }
 
 #[tokio::test]
-async fn invalid_json_responses_surface_as_json_errors() {
+async fn invalid_json_responses_surface_as_decode_errors() {
     let server = MockZenodoServer::start().await;
     let client = server.client();
 
@@ -3589,7 +3589,7 @@ async fn invalid_json_responses_surface_as_json_errors() {
     );
 
     let invalid_json = client.get_record(RecordId(300)).await;
-    assert!(matches!(invalid_json, Err(ZenodoError::Json(_))));
+    assert!(matches!(invalid_json, Err(ZenodoError::ResponseDecode { .. })));
 
     let missing = client
         .get_record_by_doi(&Doi::new("10.5281/zenodo.missing").expect("doi"))
@@ -4065,4 +4065,90 @@ async fn download_retries_recover_from_transient_server_errors() {
         .expect("download retries");
     assert_eq!(resolved.bytes_written, 5);
     assert_eq!(std::fs::read(&dest).expect("read download"), b"hello");
+}
+
+#[tokio::test]
+#[ignore = "requires live Zenodo API"]
+async fn live_search_deserializes_many_records() -> Result<(), ZenodoError> {
+    let client = ZenodoClient::anonymous()?;
+
+    for page_number in 1..=10 {
+        let query = RecordQuery::builder()
+            .published()
+            .most_recent()
+            .page(page_number)
+            .size(20)
+            .build();
+
+        let page = client
+            .search_records(&query)
+            .await
+            .unwrap_or_else(|err| {
+                panic!("Failed to deserialize page {page_number}: {err:#?}")
+            });
+
+        assert!(!page.hits.is_empty());
+
+        for item in page.items() {
+
+            if let Some(pub_date) = &item.metadata.publication_date {
+                let formatted = pub_date.to_string();
+
+                let reparsed: PublicationDate = formatted.parse()?;
+
+                assert_eq!(
+                    *pub_date, reparsed,
+                    "Publication date round-trip failed for record {}",
+                    item.id
+                );
+            }
+
+            for date in &item.metadata.dates {
+                if let Some(start) = &date.start {
+                    assert!(
+                        !start.trim().is_empty(),
+                        "Empty start date in record {}",
+                        item.id
+                    );
+                }
+
+                if let Some(end) = &date.end {
+                    assert!(
+                        !end.trim().is_empty(),
+                        "Empty end date in record {}",
+                        item.id
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "requires live Zenodo API"]
+async fn live_smiles_search_deserializes_records() -> Result<(), ZenodoError> {
+    let client = ZenodoClient::anonymous()?;
+
+    for page_number in 1..=10 {
+        let query = RecordQuery::builder()
+            .query("smiles")
+            .published()
+            .most_recent()
+            .page(page_number)
+            .size(20)
+            .build();
+
+        let page = client
+    .search_records(&query)
+    .await
+    .unwrap_or_else(|err| {
+        panic!("Failed to deserialize SMILES page {page_number}: {err:#?}")
+    });
+
+        assert!(!page.hits.is_empty());
+    }
+
+    Ok(())
 }

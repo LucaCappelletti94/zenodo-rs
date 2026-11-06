@@ -458,6 +458,17 @@ pub struct Record {
     pub extra: BTreeMap<String, Value>,
 }
 
+fn deserialize_optional_doi<'de, D>(
+    deserializer: D,
+) -> Result<Option<Doi>, D::Error> where D: Deserializer<'de>, {
+    let value = Option::<String>::deserialize(deserializer)?;
+    match value {
+        None => Ok(None),
+        Some(value) if value.trim().is_empty() => Ok(None),
+        Some(value) => Doi::new(value).map(Some).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Deserialize)]
 struct RecordWire {
     #[serde(default)]
@@ -473,7 +484,7 @@ struct RecordWire {
     conceptrecid: Option<ConceptRecId>,
     #[serde(default)]
     doi: Option<Doi>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_doi")]
     conceptdoi: Option<Doi>,
     #[serde(default)]
     metadata: RecordMetadata,
@@ -500,7 +511,7 @@ impl<'de> Deserialize<'de> for Record {
     where
         D: Deserializer<'de>,
     {
-        let wire = RecordWire::deserialize(deserializer)?;
+        let wire: RecordWire = RecordWire::deserialize(deserializer)?;
         Ok(Self {
             created: wire.created,
             modified: wire.modified.or(wire.updated),
