@@ -12,9 +12,9 @@
 //! Unknown Zenodo fields are still preserved through flattened `extra` maps so
 //! the crate remains forward compatible with mild schema drift.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use thiserror::Error;
@@ -1181,6 +1181,52 @@ pub enum PublicationDate {
     YearMonth(i32, u32),
     /// A complete date is provided.
     Full(NaiveDate)
+}
+
+impl PublicationDate {
+    /// Returns the Publication Date's year
+    #[must_use]
+    pub fn year(&self) -> i32 {
+        match self {
+            Self::Year(year) | Self::YearMonth(year, _) => *year,
+            Self::Full(date) => date.year(),
+        }
+    }
+    /// Returns the Publication Date's month if present.
+    #[must_use]
+    pub fn month(&self) -> Option<u32> {
+        match self {
+            Self::Year(_) => None,
+            Self::YearMonth(_, month) => Some(*month),
+            Self::Full(date) => Some(date.month()),
+        }
+    }
+    /// Returns the Publication Date's day, if present.
+    #[must_use]
+    pub fn day(&self) -> Option<u32> {
+        match self {
+            Self::Full(date) => Some(date.day()),
+            _ => None,
+        }
+    }
+    /// Converts the Publication Date to [`NaiveDate`] if possible.
+    #[must_use]
+    pub fn try_naive(&self) -> Option<NaiveDate> {
+        match self {
+            Self::Full(date) => Some(*date),
+            _ => None,
+        }
+    }
+}
+
+impl FromStr for PublicationDate {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        
+    }
+}
+
+impl fmt::Display for PublicationDate {
+    
 }
 
 /// Errors raised while building [`DepositMetadataUpdate`] values.
