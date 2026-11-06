@@ -353,11 +353,10 @@ impl ZenodoClient {
     /// ```
     /// use zenodo_rs::{Auth, Endpoint, ZenodoClient};
     ///
-    /// let client = ZenodoClient::builder(Auth::new("token"))
-    ///     .sandbox()
-    ///     .build()?;
+    /// let client = ZenodoClient::builder(Auth::new("token")).build()?;
     ///
-    /// assert!(matches!(client.endpoint(), Endpoint::Sandbox));
+    /// assert!(matches!(client.endpoint(), Endpoint::Production));
+    /// assert!(!client.is_anonymous());
     /// # Ok::<(), zenodo_rs::ZenodoError>(())
     /// ```
     #[must_use]
