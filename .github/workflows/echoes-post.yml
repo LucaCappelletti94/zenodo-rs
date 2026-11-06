@@ -1,0 +1,38 @@
+---
+name: echoes-post
+
+"on":
+  workflow_run: # zizmor: ignore[dangerous-triggers] the job reads only the scan's payload
+    workflows: [echoes]
+    types: [completed]
+
+permissions: {}
+
+# This job holds a write token, so it never checks out or runs pull request
+# code. The action posts only to the open pull request whose head the scan built.
+jobs:
+  post:
+    name: Post the review
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      # Resolving the review threads of copies that are gone needs contents: write.
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: echoes-payload
+          path: ${{ runner.temp }}/echoes-payload
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - uses: LucaCappelletti94/cargo-echoes@9d3e3917cbfde54b75a50204df645e33d8274b59 # v1.11.0
+        with:
+          mode: post
+          payload: ${{ runner.temp }}/echoes-payload
+          max-comments: 20
