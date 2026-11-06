@@ -500,7 +500,7 @@ impl<'de> Deserialize<'de> for Record {
     where
         D: Deserializer<'de>,
     {
-let wire: RecordWire = RecordWire::deserialize(deserializer)?;
+        let wire: RecordWire = RecordWire::deserialize(deserializer)?;
         Ok(Self {
             created: wire.created,
             modified: wire.modified.or(wire.updated),

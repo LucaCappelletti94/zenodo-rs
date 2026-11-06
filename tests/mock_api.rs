@@ -13,7 +13,10 @@
 mod mock_support;
 
 use client_uploader_traits::{
-    CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource, DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource, ResolveLatestPublicResourceByDoi, SearchPublicResources, SearchResultsLike, UpdatePublication, UpdatePublicationRequest,
+    CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource,
+    DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource,
+    ResolveLatestPublicResourceByDoi, SearchPublicResources, SearchResultsLike, UpdatePublication,
+    UpdatePublicationRequest,
 };
 use std::collections::BTreeMap;
 use std::io::Cursor;
@@ -25,8 +28,8 @@ use serde_json::json;
 use tempfile::{tempdir, Builder};
 use zenodo_rs::{
     AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi,
-    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordSelector, UploadSpec, UploadType,
-    ZenodoClient, ZenodoError, RecordQuery
+    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordQuery, RecordSelector, UploadSpec,
+    UploadType, ZenodoClient, ZenodoError,
 };
 
 use crate::mock_support::{MockZenodoServer, QueuedResponse};
@@ -4064,63 +4067,67 @@ async fn download_retries_recover_from_transient_server_errors() {
     assert_eq!(std::fs::read(&dest).expect("read download"), b"hello");
 }
 
+#[tokio::test]
+#[ignore = "requires live Zenodo API"]
+async fn live_search_deserializes_many_records() -> Result<(), ZenodoError> {
+    let client = ZenodoClient::anonymous()?;
 
-    #[tokio::test]
-    #[ignore = "requires live Zenodo API"]
-    async fn live_search_deserializes_many_records() -> Result<(), ZenodoError> {
-        let client = ZenodoClient::anonymous()?;
+    for page_number in 1..=10 {
+        let query = RecordQuery::builder()
+            .published()
+            .most_recent()
+            .page(page_number)
+            .size(20)
+            .build();
 
-        for page_number in 1..=10 {
-            let query = RecordQuery::builder()
-                .published()
-                .most_recent()
-                .page(page_number)
-                .size(20)
-                .build();
+        let page = client
+            .search_records(&query)
+            .await
+            .unwrap_or_else(|err| panic!("Failed to deserialize page {page_number}: {err:#?}"));
 
-            let page = client.search_records(&query).await.unwrap_or_else(|err| {
-    panic!(
-        "Failed to deserialize page {page_number}: {err:#?}"
-    )
-});
-
-            assert!(!page.hits.is_empty());
-            for item in page.items() {
-                if let Some(pub_date) = &item.metadata.publication_date {
-                    
-                }
-                for date in &item.metadata.dates {
-                    if let Some(start) = &date.start {
-                        assert!(!start.trim().is_empty(), "Empty start date in record {}", item.id )
-                    };
-                    if let Some(end) = &date.end {
-                        assert!(!end.trim().is_empty(), "Empty end date in record {}", item.id)
-                    }
+        assert!(!page.hits.is_empty());
+        for item in page.items() {
+            if let Some(pub_date) = &item.metadata.publication_date {}
+            for date in &item.metadata.dates {
+                if let Some(start) = &date.start {
+                    assert!(
+                        !start.trim().is_empty(),
+                        "Empty start date in record {}",
+                        item.id
+                    )
+                };
+                if let Some(end) = &date.end {
+                    assert!(
+                        !end.trim().is_empty(),
+                        "Empty end date in record {}",
+                        item.id
+                    )
                 }
             }
         }
-
-        Ok(())
     }
 
-    #[tokio::test]
-    #[ignore = "requires live Zenodo API"]
-    async fn live_smiles_search_deserializes_records() -> Result<(), ZenodoError> {
-        let client = ZenodoClient::anonymous()?;
+    Ok(())
+}
 
-        for page_number in 1..=10 {
-            let query = RecordQuery::builder()
-                .query("smiles")
-                .published()
-                .most_recent()
-                .page(page_number)
-                .size(20)
-                .build();
+#[tokio::test]
+#[ignore = "requires live Zenodo API"]
+async fn live_smiles_search_deserializes_records() -> Result<(), ZenodoError> {
+    let client = ZenodoClient::anonymous()?;
 
-            let page = client.search_records(&query).await?;
+    for page_number in 1..=10 {
+        let query = RecordQuery::builder()
+            .query("smiles")
+            .published()
+            .most_recent()
+            .page(page_number)
+            .size(20)
+            .build();
 
-            assert!(!page.hits.is_empty());
-        }
+        let page = client.search_records(&query).await?;
 
-        Ok(())
+        assert!(!page.hits.is_empty());
     }
+
+    Ok(())
+}

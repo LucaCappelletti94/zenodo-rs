@@ -981,15 +981,22 @@ impl ZenodoClient {
     }
 }
 
-fn decode_json<T: DeserializeOwned> (
-    bytes: &[u8],
-    url: &str,
-) -> Result<T, ZenodoError> {
+fn decode_json<T: DeserializeOwned>(bytes: &[u8], url: &str) -> Result<T, ZenodoError> {
     let mut decoder = serde_json::Deserializer::from_slice(bytes);
 
-    let result = serde_path_to_error::deserialize(&mut decoder).map_err(|error| ZenodoError::ResponseDecode { url: url.to_owned(), path: error.path().to_string(), source: error.into_inner() })?;
+    let result = serde_path_to_error::deserialize(&mut decoder).map_err(|error| {
+        ZenodoError::ResponseDecode {
+            url: url.to_owned(),
+            path: error.path().to_string(),
+            source: error.into_inner(),
+        }
+    })?;
 
-    decoder.end().map_err(|error| ZenodoError::ResponseDecode { url: url.to_owned(), path: "$".to_owned(), source: error })?;
+    decoder.end().map_err(|error| ZenodoError::ResponseDecode {
+        url: url.to_owned(),
+        path: "$".to_owned(),
+        source: error,
+    })?;
     Ok(result)
 }
 

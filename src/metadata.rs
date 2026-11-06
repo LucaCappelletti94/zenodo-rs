@@ -20,7 +20,7 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use crate::serde_util::deserialize_option_u64ish;
+use crate::{serde_util::deserialize_option_u64ish, ZenodoError};
 
 macro_rules! string_enum {
     ($(#[$enum_meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
@@ -611,7 +611,10 @@ impl RecordDateBuilder {
     /// Returns an error if both the start and end fields are empty.
     pub fn build(self) -> Result<RecordDate, MetadataEntryBuildError> {
         if self.start.is_none() && self.end.is_none() {
-            return Err(MetadataEntryBuildError::MissingField { entry: "RecordDate", field: "start or end" })
+            return Err(MetadataEntryBuildError::MissingField {
+                entry: "RecordDate",
+                field: "start or end",
+            });
         }
 
         Ok(RecordDate {
@@ -1138,7 +1141,7 @@ pub struct DepositMetadataUpdate {
     pub upload_type: UploadType,
     /// Publication date, when supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<PublicationDate>,
+    pub publication_date: Option<NaiveDate>,
     /// HTML description body sent as Zenodo's `description` field.
     #[serde(rename = "description")]
     pub description_html: String,
@@ -1174,13 +1177,14 @@ pub struct DepositMetadataUpdate {
 }
 
 /// Variants of possible date specificity supplied by Zenodo.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicationDate {
     /// Only the year is provided.
     Year(i32),
-    /// Only the year and month are provided. 
+    /// Only the year and month are provided.
     YearMonth(i32, u32),
     /// A complete date is provided.
-    Full(NaiveDate)
+    Full(NaiveDate),
 }
 
 impl PublicationDate {
@@ -1220,13 +1224,65 @@ impl PublicationDate {
 }
 
 impl FromStr for PublicationDate {
+    type Err = ZenodoError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        
+        let invalid = || ZenodoError::InvalidPublicationDate(s.to_owned());
+
+        match s.split('-').collect::<Vec<_>>().as_slice() {
+            [year] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                Ok(Self::Year(year))
+            }
+            [year, month] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                let month = month.parse::<u32>().map_err(|_| invalid())?;
+                if !(1..=12).contains(&month) {
+                    return Err(invalid());
+                }
+                Ok(Self::YearMonth(year, month))
+            }
+            [year, month, day] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                let month = month.parse::<u32>().map_err(|_| invalid())?;
+                let day = day.parse::<u32>().map_err(|_| invalid())?;
+
+                let date = NaiveDate::from_ymd_opt(year, month, day).ok_or_else(invalid)?;
+
+                Ok(Self::Full(date))
+            }
+
+            _ => Err(invalid()),
+        }
     }
 }
 
 impl fmt::Display for PublicationDate {
-    
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Year(year) => write!(f, "{year:04}"),
+            Self::YearMonth(year, month) => write!(f, "{year:04}-{month:02}"),
+            Self::Full(date) => write!(f, "{}", date.format("%Y-%m-%d")),
+        }
+    }
+}
+
+impl serde::Serialize for PublicationDate {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicationDate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
 }
 
 /// Errors raised while building [`DepositMetadataUpdate`] values.
@@ -1518,7 +1574,7 @@ pub struct RecordMetadata {
     pub title: String,
     /// Publication date, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<NaiveDate>,
+    pub publication_date: Option<PublicationDate>,
     /// HTML description body, when present.
     #[serde(
         rename = "description",
@@ -1656,6 +1712,8 @@ pub struct RecordMetadata {
 
 #[cfg(test)]
 mod tests {
+    use crate::metadata::PublicationDate;
+
     use super::{
         AccessRight, CommunityRef, Contributor, Creator, DepositMetadataBuildError,
         DepositMetadataUpdate, GrantRef, LicenseRef, MetadataEntryBuildError, RecordDate,
@@ -1887,7 +1945,10 @@ mod tests {
             .extra_field("y", json!(2))
             .build()
             .unwrap();
-        assert_eq!(Contributor::new("Ada", "Supervisor").type_, Some("Supervisor".to_string()));
+        assert_eq!(
+            Contributor::new("Ada", "Supervisor").type_,
+            Some("Supervisor".to_string())
+        );
         assert_eq!(contributor.extra.get("x"), Some(&json!(1)));
         assert_eq!(contributor.extra.get("y"), Some(&json!(2)));
 
@@ -2219,5 +2280,26 @@ mod tests {
                 extra: std::collections::BTreeMap::default(),
             })
         );
+    }
+
+    #[test]
+    fn publication_date_roundtrip() {
+        for input in ["2026", "2018-09", "2026-11-06"] {
+            let date: PublicationDate = input.parse().unwrap();
+
+            assert_eq!(date.to_string(), input);
+
+            let json = serde_json::to_string(&date).unwrap();
+            let decoded: PublicationDate = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(decoded, date);
+        }
+    }
+
+    #[test]
+    fn publication_date_rejects_invalid_dates() {
+        for input in ["", "hello", "2026-13", "2026-02-30", "2026-11-06-extra"] {
+            assert!(input.parse::<PublicationDate>().is_err());
+        }
     }
 }
