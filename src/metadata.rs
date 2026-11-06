@@ -1138,7 +1138,7 @@ pub struct DepositMetadataUpdate {
     pub upload_type: UploadType,
     /// Publication date, when supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<NaiveDate>,
+    pub publication_date: Option<PublicationDate>,
     /// HTML description body sent as Zenodo's `description` field.
     #[serde(rename = "description")]
     pub description_html: String,
@@ -1171,6 +1171,16 @@ pub struct DepositMetadataUpdate {
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// Variants of possible date specificity supplied by Zenodo.
+pub enum PublicationDate {
+    /// Only the year is provided.
+    Year(i32),
+    /// Only the year and month are provided. 
+    YearMonth(i32, u32),
+    /// A complete date is provided.
+    Full(NaiveDate)
 }
 
 /// Errors raised while building [`DepositMetadataUpdate`] values.
