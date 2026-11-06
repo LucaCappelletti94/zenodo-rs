@@ -2302,4 +2302,75 @@ mod tests {
             assert!(input.parse::<PublicationDate>().is_err());
         }
     }
+
+    #[test]
+fn record_metadata_deserializes_optional_fields() {
+    let payload = serde_json::json!({
+        "title": "Test record",
+        "publication_date": "2018-09",
+        "dates": [
+            {
+                "start": "2026-01-01",
+                "end": "2026-02-01",
+                "type": "Collected"
+            },
+            {
+                "type": "Issued"
+            }
+        ],
+        "contributors": [
+            {
+                "name": "Doe, Jane"
+            }
+        ],
+        "grants": [
+            {
+                "code": "ABC123",
+                "internal_id": "grant-42"
+            }
+        ]
+    });
+
+    let metadata: RecordMetadata =
+        serde_json::from_value(payload).unwrap();
+
+    assert_eq!(
+        metadata.publication_date,
+        Some(PublicationDate::YearMonth(2018, 9))
+    );
+
+    assert_eq!(
+        metadata.dates[0].start.as_deref(),
+        Some("2026-01-01")
+    );
+
+    assert_eq!(
+        metadata.dates[0].end.as_deref(),
+        Some("2026-02-01")
+    );
+
+    assert_eq!(metadata.dates[1].start, None);
+    assert_eq!(metadata.dates[1].end, None);
+
+    assert_eq!(metadata.contributors[0].type_, None);
+
+    assert_eq!(metadata.grants[0].id, None);
+
+    assert_eq!(
+        metadata.grants[0].extra.get("code"),
+        Some(&serde_json::json!("ABC123"))
+    );
+}
+
+#[test]
+fn publication_date_preserves_partial_precision() {
+    let date: PublicationDate = "2018-09".parse().unwrap();
+
+    assert_eq!(date, PublicationDate::YearMonth(2018, 9));
+    assert_eq!(date.year(), 2018);
+    assert_eq!(date.month(), Some(9));
+    assert_eq!(date.day(), None);
+    assert_eq!(date.try_naive(), None);
+    assert_eq!(date.to_string(), "2018-09");
+}
 }
