@@ -65,7 +65,7 @@ pub use downloads::{DownloadStream, ResolvedDownload};
 pub use endpoint::Endpoint;
 pub use error::{FieldError, ZenodoError};
 pub use ids::{BucketUrl, ConceptRecId, DepositionFileId, DepositionId, Doi, DoiError, RecordId};
-pub use metadata::{
+pub use metadata::{ PublicationDate, DatePrecision, 
     AccessRight, CommunityRef, CommunityRefBuilder, Contributor, ContributorBuilder, Creator,
     CreatorBuilder, DepositMetadataBuildError, DepositMetadataUpdate, DepositMetadataUpdateBuilder,
     GrantRef, GrantRefBuilder, LicenseRef, LicenseRefBuilder, MetadataEntryBuildError, RecordDate,
