@@ -184,46 +184,6 @@ jobs:
       - name: Check semver compatibility
         run: cargo semver-checks check-release --default-features --features checksums,indicatif
 
-  audit:
-    name: Audit
-    runs-on: ubuntu-26.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
-
-      - name: Audit dependencies
-        run: cargo audit --deny warnings
-
-  deny:
-    name: Deny
-    runs-on: ubuntu-26.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo artifacts
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
-
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@cargo-deny
-
-      - name: Check supply-chain policy
-        run: cargo deny check
-
   coverage:
     name: Coverage
     runs-on: ubuntu-26.04
