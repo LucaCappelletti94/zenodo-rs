@@ -2066,6 +2066,13 @@ mod tests {
         assert_eq!(date.end.as_deref(), Some("2026-04-04"));
         assert_eq!(date.extra.get("certainty"), Some(&json!("exact")));
         assert_eq!(date.extra.get("timezone"), Some(&json!("UTC")));
+        assert_eq!(
+            RecordDate::builder().date_type("Collected").build(),
+            Err(MetadataEntryBuildError::MissingField {
+                entry: "RecordDate",
+                field: "start or end",
+            })
+        );
     }
 
     #[test]
