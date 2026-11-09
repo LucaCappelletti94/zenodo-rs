@@ -20,7 +20,7 @@ use serde_json::Value;
 use thiserror::Error;
 use url::Url;
 
-use crate::{serde_util::deserialize_option_u64ish, ZenodoError};
+use crate::serde_util::deserialize_option_u64ish;
 
 macro_rules! string_enum {
     ($(#[$enum_meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $value:literal),+ $(,)? }) => {
@@ -1224,9 +1224,9 @@ impl DatePrecision {
 }
 
 impl FromStr for DatePrecision {
-    type Err = ZenodoError;
+    type Err = PublicationDateError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let invalid = || ZenodoError::InvalidPublicationDate(s.to_owned());
+        let invalid = || PublicationDateError::Invalid(s.to_owned());
 
         match s.split('-').collect::<Vec<_>>().as_slice() {
             [year] => {
@@ -1266,10 +1266,10 @@ impl fmt::Display for DatePrecision {
     }
 }
 
-/// The specified publication date(s) with provided specificity. 
+/// The specified publication date(s) with provided specificity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PublicationDate {
-    /// A single date of publication, minimally year specified. 
+    /// A single date of publication, minimally year specified.
     Date(DatePrecision),
     /// An interval date range, as outline [here](https://inveniordm.docs.cern.ch/reference/metadata/#publication-date-1).
     Interval {
@@ -1277,20 +1277,22 @@ pub enum PublicationDate {
         start: DatePrecision,
         /// The end date of the interval.
         end: DatePrecision,
-    }
+    },
 }
 
-
 impl FromStr for PublicationDate {
-    type Err = ZenodoError;
+    type Err = PublicationDateError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if let Some((start,end)) = s.split_once('/') {
+        if let Some((start, end)) = s.split_once('/') {
             if start.is_empty() || end.is_empty() || end.contains('/') {
-                return Err(ZenodoError::InvalidPublicationDate(s.to_owned()));
+                return Err(PublicationDateError::Invalid(s.to_owned()));
             }
 
-            Ok(Self::Interval { start: start.parse()?, end: end.parse()? })
+            Ok(Self::Interval {
+                start: start.parse()?,
+                end: end.parse()?,
+            })
         } else {
             Ok(Self::Date(s.parse()?))
         }
@@ -1300,12 +1302,11 @@ impl FromStr for PublicationDate {
 impl fmt::Display for PublicationDate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            PublicationDate::Date(date_precision) => write!(f,"{date_precision}"),
-            PublicationDate::Interval { start, end } => write!(f,"{start}/{end}"),
+            PublicationDate::Date(date_precision) => write!(f, "{date_precision}"),
+            PublicationDate::Interval { start, end } => write!(f, "{start}/{end}"),
         }
     }
 }
-
 
 impl serde::Serialize for PublicationDate {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -1324,6 +1325,15 @@ impl<'de> serde::Deserialize<'de> for PublicationDate {
         let value = String::deserialize(deserializer)?;
         value.parse().map_err(serde::de::Error::custom)
     }
+}
+
+/// Internal Error handling for [`PublicationDate`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PublicationDateError {
+    /// Publication Date was found invalid and unable to be parsed.
+    #[error("invalid publication date: {0}")]
+    /// The invalid publication date.
+    Invalid(String),
 }
 
 /// Errors raised while building [`DepositMetadataUpdate`] values.
@@ -1753,7 +1763,7 @@ pub struct RecordMetadata {
 
 #[cfg(test)]
 mod tests {
-    use crate::{DatePrecision, metadata::PublicationDate};
+    use crate::{metadata::PublicationDate, DatePrecision};
 
     use super::{
         AccessRight, CommunityRef, Contributor, Creator, DepositMetadataBuildError,
@@ -2345,171 +2355,162 @@ mod tests {
     }
 
     #[test]
-fn record_metadata_deserializes_optional_fields() {
-    let payload = serde_json::json!({
-        "title": "Test record",
-        "publication_date": "2018-09",
-        "dates": [
-            {
-                "start": "2026-01-01",
-                "end": "2026-02-01",
-                "type": "Collected"
-            },
-            {
-                "type": "Issued"
-            }
-        ],
-        "contributors": [
-            {
-                "name": "Doe, Jane"
-            }
-        ],
-        "grants": [
-            {
-                "code": "ABC123",
-                "internal_id": "grant-42"
-            }
-        ]
-    });
+    fn record_metadata_deserializes_optional_fields() {
+        let payload = serde_json::json!({
+            "title": "Test record",
+            "publication_date": "2018-09",
+            "dates": [
+                {
+                    "start": "2026-01-01",
+                    "end": "2026-02-01",
+                    "type": "Collected"
+                },
+                {
+                    "type": "Issued"
+                }
+            ],
+            "contributors": [
+                {
+                    "name": "Doe, Jane"
+                }
+            ],
+            "grants": [
+                {
+                    "code": "ABC123",
+                    "internal_id": "grant-42"
+                }
+            ]
+        });
 
-    let metadata: RecordMetadata =
-        serde_json::from_value(payload).unwrap();
+        let metadata: RecordMetadata = serde_json::from_value(payload).unwrap();
 
-    assert_eq!(
-        metadata.publication_date,
-        Some(PublicationDate::Date(DatePrecision::YearMonth(2018, 9)))
-    );
+        assert_eq!(
+            metadata.publication_date,
+            Some(PublicationDate::Date(DatePrecision::YearMonth(2018, 9)))
+        );
 
-    assert_eq!(
-        metadata.dates[0].start.as_deref(),
-        Some("2026-01-01")
-    );
+        assert_eq!(metadata.dates[0].start.as_deref(), Some("2026-01-01"));
 
-    assert_eq!(
-        metadata.dates[0].end.as_deref(),
-        Some("2026-02-01")
-    );
+        assert_eq!(metadata.dates[0].end.as_deref(), Some("2026-02-01"));
 
-    assert_eq!(metadata.dates[1].start, None);
-    assert_eq!(metadata.dates[1].end, None);
+        assert_eq!(metadata.dates[1].start, None);
+        assert_eq!(metadata.dates[1].end, None);
 
-    assert_eq!(metadata.contributors[0].type_, None);
+        assert_eq!(metadata.contributors[0].type_, None);
 
-    assert_eq!(metadata.grants[0].id, None);
+        assert_eq!(metadata.grants[0].id, None);
 
-    assert_eq!(
-        metadata.grants[0].extra.get("code"),
-        Some(&serde_json::json!("ABC123"))
-    );
-}
-
-#[test]
-fn publication_date_preserves_partial_precision() {
-    let date: DatePrecision = "2018-09".parse().unwrap();
-
-    assert_eq!(date, DatePrecision::YearMonth(2018, 9));
-    assert_eq!(date.year(), 2018);
-    assert_eq!(date.month(), Some(9));
-    assert_eq!(date.day(), None);
-    assert_eq!(date.try_naive(), None);
-}
-
-#[test]
-fn publication_date_parses_date_precisions() {
-    assert_eq!(
-        "2026".parse::<DatePrecision>().unwrap(),
-        DatePrecision::Year(2026)
-    );
-
-    assert_eq!(
-        "2026-11".parse::<DatePrecision>().unwrap(),
-        DatePrecision::YearMonth(2026, 11)
-    );
-
-    assert_eq!(
-        "2026-11-06".parse::<DatePrecision>().unwrap(),
-        DatePrecision::Full(
-            NaiveDate::from_ymd_opt(2026, 11, 6).unwrap()
-        )
-    );
-}
-
-#[test]
-fn publication_date_parses_intervals() {
-    assert_eq!(
-        "1981/2024".parse::<PublicationDate>().unwrap(),
-        PublicationDate::Interval {
-            start: DatePrecision::Year(1981),
-            end: DatePrecision::Year(2024),
-        }
-    );
-
-    assert_eq!(
-        "2024-06-19/2024-06-30"
-            .parse::<PublicationDate>()
-            .unwrap(),
-        PublicationDate::Interval {
-            start: DatePrecision::Full(
-                NaiveDate::from_ymd_opt(2024, 6, 19).unwrap()
-            ),
-            end: DatePrecision::Full(
-                NaiveDate::from_ymd_opt(2024, 6, 30).unwrap()
-            ),
-        }
-    );
-
-    assert_eq!(
-        "1939-09-01/1945-09"
-            .parse::<PublicationDate>()
-            .unwrap(),
-        PublicationDate::Interval {
-            start: DatePrecision::Full(
-                NaiveDate::from_ymd_opt(1939, 9, 1).unwrap()
-            ),
-            end: DatePrecision::YearMonth(1945, 9),
-        }
-    );
-}
-
-#[test]
-fn publication_date_roundtrips() {
-    for input in [
-        "2026",
-        "2018-09",
-        "2026-11-06",
-        "1981/2024",
-        "2024-06-19/2024-06-30",
-        "1939-09-01/1945-09",
-    ] {
-        let date: PublicationDate = input.parse().unwrap();
-
-        assert_eq!(date.to_string(), input);
-
-        let json = serde_json::to_string(&date).unwrap();
-        let decoded: PublicationDate =
-            serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, date);
-    }
-}
-
-#[test]
-fn publication_date_rejects_invalid_values() {
-    for input in [
-        "",
-        "hello",
-        "2026-13",
-        "2026-02-30",
-        "2020/",
-        "/2020",
-        "2020/2021/2022",
-        "2020-13/2021",
-        "2020/2021-02-30",
-    ] {
-        assert!(
-            input.parse::<PublicationDate>().is_err(),
-            "Unexpectedly accepted: {input}"
+        assert_eq!(
+            metadata.grants[0].extra.get("code"),
+            Some(&serde_json::json!("ABC123"))
         );
     }
-}
+
+    #[test]
+    fn publication_date_preserves_partial_precision() {
+        let date: DatePrecision = "2018-09".parse().unwrap();
+
+        assert_eq!(date, DatePrecision::YearMonth(2018, 9));
+        assert_eq!(date.year(), 2018);
+        assert_eq!(date.month(), Some(9));
+        assert_eq!(date.day(), None);
+        assert_eq!(date.try_naive(), None);
+    }
+
+    #[test]
+    fn publication_date_parses_date_precisions() {
+        assert_eq!(
+            "2026".parse::<DatePrecision>().unwrap(),
+            DatePrecision::Year(2026)
+        );
+
+        assert_eq!(
+            "2026-11".parse::<DatePrecision>().unwrap(),
+            DatePrecision::YearMonth(2026, 11)
+        );
+
+        assert_eq!(
+            "2026-11-06".parse::<DatePrecision>().unwrap(),
+            DatePrecision::Full(NaiveDate::from_ymd_opt(2026, 11, 6).unwrap())
+        );
+    }
+
+    #[test]
+    fn publication_date_parses_intervals() {
+        assert_eq!(
+            "1981/2024".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Year(1981),
+                end: DatePrecision::Year(2024),
+            }
+        );
+
+        assert_eq!(
+            "2024-06-19/2024-06-30".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Full(NaiveDate::from_ymd_opt(2024, 6, 19).unwrap()),
+                end: DatePrecision::Full(NaiveDate::from_ymd_opt(2024, 6, 30).unwrap()),
+            }
+        );
+
+        assert_eq!(
+            "1939-09-01/1945-09".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Full(NaiveDate::from_ymd_opt(1939, 9, 1).unwrap()),
+                end: DatePrecision::YearMonth(1945, 9),
+            }
+        );
+    }
+
+    #[test]
+    fn publication_date_roundtrips() {
+        for input in [
+            "2026",
+            "2018-09",
+            "2026-11-06",
+            "1981/2024",
+            "2024-06-19/2024-06-30",
+            "1939-09-01/1945-09",
+        ] {
+            let date: PublicationDate = input.parse().unwrap();
+
+            assert_eq!(date.to_string(), input);
+
+            let json = serde_json::to_string(&date).unwrap();
+            let decoded: PublicationDate = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(decoded, date);
+        }
+    }
+
+    #[test]
+    fn publication_date_rejects_invalid_values() {
+        for input in [
+            "",
+            "hello",
+            "2026-13",
+            "2026-02-30",
+            "2020/",
+            "/2020",
+            "2020/2021/2022",
+            "2020-13/2021",
+            "2020/2021-02-30",
+        ] {
+            assert!(
+                input.parse::<PublicationDate>().is_err(),
+                "Unexpectedly accepted: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn record_date_builder_rejects_missing_boundaries() {
+        assert_eq!(
+            RecordDate::builder().date_type("Collected").build(),
+            Err(MetadataEntryBuildError::MissingField {
+                entry: "RecordDate",
+                field: "start or end",
+            })
+        );
+    }
 }

@@ -43,13 +43,6 @@ pub enum ZenodoError {
         #[from]
         reqwest::Error,
     ),
-    /// JSON serialization or deserialization failed.
-    #[error(transparent)]
-    Json(
-        /// Underlying JSON error.
-        #[from]
-        serde_json::Error,
-    ),
     /// A local I/O operation failed.
     #[error(transparent)]
     Io(
@@ -75,9 +68,6 @@ pub enum ZenodoError {
         #[source]
         source: serde_json::Error,
     },
-    /// Publication Date was unable to be parsed
-    #[error("invalid publication date: {0}")]
-    InvalidPublicationDate(String),
     /// A required environment variable could not be read.
     #[error("failed to read environment variable {name}: {source}")]
     EnvVar {

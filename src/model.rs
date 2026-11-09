@@ -458,14 +458,15 @@ pub struct Record {
     pub extra: BTreeMap<String, Value>,
 }
 
-fn deserialize_optional_doi<'de, D>(
-    deserializer: D,
-) -> Result<Option<Doi>, D::Error> where D: Deserializer<'de>, {
+fn deserialize_optional_doi<'de, D>(deserializer: D) -> Result<Option<Doi>, D::Error>
+where
+    D: Deserializer<'de>,
+{
     let value = Option::<String>::deserialize(deserializer)?;
     match value {
         None => Ok(None),
         Some(value) if value.trim().is_empty() => Ok(None),
-        Some(value) => Doi::new(value).map(Some).map_err(serde::de::Error::custom)
+        Some(value) => Doi::new(value).map(Some).map_err(serde::de::Error::custom),
     }
 }
 

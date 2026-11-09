@@ -15,7 +15,7 @@ mod mock_support;
 use client_uploader_traits::{
     CreatePublication, CreatePublicationRequest, DownloadNamedPublicFile, DraftResource,
     DraftWorkflow, ListResourceFiles, LookupByDoi, ReadPublicResource, ResolveLatestPublicResource,
-    ResolveLatestPublicResourceByDoi, SearchPublicResources, SearchResultsLike, UpdatePublication,
+    ResolveLatestPublicResourceByDoi, SearchPublicResources, UpdatePublication,
     UpdatePublicationRequest,
 };
 use std::collections::BTreeMap;
@@ -27,9 +27,9 @@ use axum::http::{Method, StatusCode};
 use serde_json::json;
 use tempfile::{tempdir, Builder};
 use zenodo_rs::{
-    AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi, metadata::PublicationDate,
-    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordQuery, RecordSelector, UploadSpec,
-    UploadType, ZenodoClient, ZenodoError,
+    AccessRight, ArtifactSelector, Auth, Creator, DepositMetadataUpdate, DepositionId, Doi,
+    Endpoint, FileReplacePolicy, PollOptions, RecordId, RecordSelector, UploadSpec, UploadType,
+    ZenodoClient, ZenodoError,
 };
 
 use crate::mock_support::{MockZenodoServer, QueuedResponse};
@@ -3589,7 +3589,10 @@ async fn invalid_json_responses_surface_as_decode_errors() {
     );
 
     let invalid_json = client.get_record(RecordId(300)).await;
-    assert!(matches!(invalid_json, Err(ZenodoError::ResponseDecode { .. })));
+    assert!(matches!(
+        invalid_json,
+        Err(ZenodoError::ResponseDecode { .. })
+    ));
 
     let missing = client
         .get_record_by_doi(&Doi::new("10.5281/zenodo.missing").expect("doi"))
@@ -4068,87 +4071,161 @@ async fn download_retries_recover_from_transient_server_errors() {
 }
 
 #[tokio::test]
-#[ignore = "requires live Zenodo API"]
-async fn live_search_deserializes_many_records() -> Result<(), ZenodoError> {
-    let client = ZenodoClient::anonymous()?;
+async fn search_records_deserializes_metadata_fixtures() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
 
-    for page_number in 1..=10 {
-        let query = RecordQuery::builder()
-            .published()
-            .most_recent()
-            .page(page_number)
-            .size(20)
-            .build();
-
-        let page = client
-            .search_records(&query)
-            .await
-            .unwrap_or_else(|err| {
-                panic!("Failed to deserialize page {page_number}: {err:#?}")
-            });
-
-        assert!(!page.hits.is_empty());
-
-        for item in page.items() {
-
-            if let Some(pub_date) = &item.metadata.publication_date {
-                let formatted = pub_date.to_string();
-
-                let reparsed: PublicationDate = formatted.parse()?;
-
-                assert_eq!(
-                    *pub_date, reparsed,
-                    "Publication date round-trip failed for record {}",
-                    item.id
-                );
-            }
-
-            for date in &item.metadata.dates {
-                if let Some(start) = &date.start {
-                    assert!(
-                        !start.trim().is_empty(),
-                        "Empty start date in record {}",
-                        item.id
-                    );
-                }
-
-                if let Some(end) = &date.end {
-                    assert!(
-                        !end.trim().is_empty(),
-                        "Empty end date in record {}",
-                        item.id
-                    );
-                }
-            }
+    let mut partial = record_json(&server, 101);
+    partial["metadata"]["publication_date"] = json!("2018-09");
+    partial["metadata"]["dates"] = json!([
+        {
+            "start": "2020-01-01",
+            "end": "2020-12-31",
+            "type": "Collected"
+        },
+        {
+            "type": "Issued"
         }
-    }
+    ]);
+    partial["metadata"]["contributors"] = json!([
+        { "name": "Doe, Jane" }
+    ]);
+    partial["metadata"]["grants"] = json!([
+        {
+            "code": "ABC123",
+            "internal_id": "grant-42"
+        }
+    ]);
 
-    Ok(())
+    let mut interval = record_json(&server, 102);
+    interval["metadata"]["publication_date"] = json!("1981/2024");
+
+    let mut full_interval = record_json(&server, 103);
+    full_interval["metadata"]["publication_date"] = json!("2024-06-19/2024-06-30");
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records",
+        StatusCode::OK,
+        json!({
+            "hits": {
+                "hits": [partial, interval, full_interval],
+                "total": 3
+            },
+            "links": {}
+        }),
+    );
+
+    let page = client
+        .search_records(&zenodo_rs::RecordQuery::builder().build())
+        .await
+        .expect("deserialize search fixtures");
+
+    assert_eq!(page.hits.len(), 3);
+
+    let metadata = &page.hits[0].metadata;
+
+    assert_eq!(
+        metadata.publication_date.as_ref().unwrap().to_string(),
+        "2018-09"
+    );
+
+    assert_eq!(metadata.dates.len(), 2);
+    assert_eq!(metadata.dates[0].start.as_deref(), Some("2020-01-01"));
+    assert_eq!(metadata.dates[0].end.as_deref(), Some("2020-12-31"));
+    assert_eq!(metadata.dates[1].start, None);
+    assert_eq!(metadata.dates[1].end, None);
+    assert_eq!(metadata.dates[1].type_.as_deref(), Some("Issued"));
+
+    assert_eq!(metadata.contributors[0].type_, None);
+    assert_eq!(metadata.grants[0].id, None);
+    assert_eq!(metadata.grants[0].extra.get("code"), Some(&json!("ABC123")));
+    assert_eq!(
+        metadata.grants[0].extra.get("internal_id"),
+        Some(&json!("grant-42"))
+    );
+
+    assert_eq!(
+        page.hits[1]
+            .metadata
+            .publication_date
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "1981/2024"
+    );
+
+    assert_eq!(
+        page.hits[2]
+            .metadata
+            .publication_date
+            .as_ref()
+            .unwrap()
+            .to_string(),
+        "2024-06-19/2024-06-30"
+    );
 }
 
 #[tokio::test]
-#[ignore = "requires live Zenodo API"]
-async fn live_smiles_search_deserializes_records() -> Result<(), ZenodoError> {
-    let client = ZenodoClient::anonymous()?;
+async fn record_deserializes_optional_conceptdoi() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
 
-    for page_number in 1..=10 {
-        let query = RecordQuery::builder()
-            .query("smiles")
-            .published()
-            .most_recent()
-            .page(page_number)
-            .size(20)
-            .build();
+    let cases = [
+        (201, json!(null), None),
+        (202, json!(""), None),
+        (203, json!("   "), None),
+        (204, json!("10.5281/zenodo.204"), Some("10.5281/zenodo.204")),
+    ];
 
-        let page = client
-    .search_records(&query)
-    .await
-    .unwrap_or_else(|err| {
-        panic!("Failed to deserialize SMILES page {page_number}: {err:#?}")
-    });
+    for (id, value, expected) in cases {
+        let mut fixture = record_json(&server, id);
+        fixture["conceptdoi"] = value;
 
-        assert!(!page.hits.is_empty());
+        server.enqueue_json(
+            Method::GET,
+            &format!("/api/records/{id}"),
+            StatusCode::OK,
+            fixture,
+        );
+
+        let record = client
+            .get_record(RecordId(id))
+            .await
+            .expect("deserialize optional concept DOI");
+
+        assert_eq!(
+            record
+                .conceptdoi
+                .as_ref()
+                .map(ToString::to_string)
+                .as_deref(),
+            expected
+        );
     }
+}
 
-    Ok(())
+#[tokio::test]
+async fn invalid_conceptdoi_returns_decode_error() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+
+    let mut fixture = record_json(&server, 301);
+    fixture["conceptdoi"] = json!("not-a-doi");
+
+    server.enqueue_json(Method::GET, "/api/records/301", StatusCode::OK, fixture);
+
+    let result = client.get_record(RecordId(301)).await;
+
+    match result {
+        Err(ZenodoError::ResponseDecode { url, path, source }) => {
+            assert!(url.ends_with("/api/records/301"));
+            assert_eq!(path, "conceptdoi");
+            assert!(
+                source.to_string().contains("DOI"),
+                "Unexpected error: {source}"
+            );
+        }
+        other => panic!("Expected ResponseDecode, got {other:?}"),
+    }
 }
