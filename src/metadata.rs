@@ -2483,7 +2483,7 @@ mod tests {
         ] {
             assert_eq!(
                 input.parse::<PublicationDate>(),
-                Err(super::PublicationDateError::Invalid(input.to_owned())), 
+                Err(super::PublicationDateError::Invalid(input.to_owned())),
             );
         }
     }

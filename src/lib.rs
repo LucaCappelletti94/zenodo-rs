@@ -69,10 +69,10 @@ pub use metadata::{
     AccessRight, CommunityRef, CommunityRefBuilder, Contributor, ContributorBuilder, Creator,
     CreatorBuilder, DatePrecision, DepositMetadataBuildError, DepositMetadataUpdate,
     DepositMetadataUpdateBuilder, GrantRef, GrantRefBuilder, LicenseRef, LicenseRefBuilder,
-    MetadataEntryBuildError, PublicationDate, RecordDate, RecordDateBuilder, RecordIdentifier,
-    RecordIdentifierBuilder, RecordMetadata, RecordRelations, RecordVersionRelation,
-    RelatedIdentifier, RelatedIdentifierBuilder, ResourceType, ResourceTypeBuilder, Subject,
-    SubjectBuilder, UploadType, PublicationDateError
+    MetadataEntryBuildError, PublicationDate, PublicationDateError, RecordDate, RecordDateBuilder,
+    RecordIdentifier, RecordIdentifierBuilder, RecordMetadata, RecordRelations,
+    RecordVersionRelation, RelatedIdentifier, RelatedIdentifierBuilder, ResourceType,
+    ResourceTypeBuilder, Subject, SubjectBuilder, UploadType,
 };
 pub use model::{
     ArtifactInfo, BucketObject, DepositState, Deposition, DepositionFile, DepositionLinks,
