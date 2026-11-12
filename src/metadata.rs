@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::NaiveDate;
+use jiff::civil::Date;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use thiserror::Error;
@@ -1131,7 +1131,7 @@ pub struct DepositMetadataUpdate {
     pub upload_type: UploadType,
     /// Publication date, when supplied.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<NaiveDate>,
+    pub publication_date: Option<Date>,
     /// HTML description body sent as Zenodo's `description` field.
     #[serde(rename = "description")]
     pub description_html: String,
@@ -1182,7 +1182,7 @@ pub enum DepositMetadataBuildError {
 pub struct DepositMetadataUpdateBuilder {
     title: Option<String>,
     upload_type: Option<UploadType>,
-    publication_date: Option<NaiveDate>,
+    publication_date: Option<Date>,
     description_html: Option<String>,
     creators: Vec<Creator>,
     access_right: Option<AccessRight>,
@@ -1244,7 +1244,7 @@ impl DepositMetadataUpdateBuilder {
 
     /// Sets the publication date.
     #[must_use]
-    pub fn publication_date(mut self, publication_date: NaiveDate) -> Self {
+    pub fn publication_date(mut self, publication_date: Date) -> Self {
         self.publication_date = Some(publication_date);
         self
     }
@@ -1455,7 +1455,7 @@ pub struct RecordMetadata {
     pub title: String,
     /// Publication date, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<NaiveDate>,
+    pub publication_date: Option<Date>,
     /// HTML description body, when present.
     #[serde(
         rename = "description",
@@ -1507,7 +1507,7 @@ pub struct RecordMetadata {
     pub access_conditions: Option<String>,
     /// Embargo date for embargoed records, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub embargo_date: Option<NaiveDate>,
+    pub embargo_date: Option<Date>,
     /// License details, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub license: Option<LicenseRef>,
@@ -1599,7 +1599,6 @@ mod tests {
         RecordIdentifier, RecordMetadata, RecordRelations, RecordVersionRelation,
         RelatedIdentifier, ResourceType, Subject, UploadType,
     };
-    use chrono::NaiveDate;
     use serde_json::json;
 
     #[test]
@@ -1654,7 +1653,7 @@ mod tests {
 
     #[test]
     fn metadata_builder_supports_full_optional_surface() {
-        let publication_date = NaiveDate::from_ymd_opt(2026, 4, 3).unwrap();
+        let publication_date = jiff::civil::date(2026, 4, 3);
         let primary_creator = Creator::builder()
             .name("Doe, Jane")
             .affiliation("Zenodo")
