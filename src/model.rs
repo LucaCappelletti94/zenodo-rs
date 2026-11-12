@@ -13,7 +13,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use url::Url;
@@ -407,10 +407,10 @@ pub struct RecordParent {
 pub struct Record {
     /// Record creation timestamp, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub created: Option<DateTime<Utc>>,
+    pub created: Option<Timestamp>,
     /// Record modification timestamp, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub modified: Option<DateTime<Utc>>,
+    pub modified: Option<Timestamp>,
     /// Record identifier.
     pub id: RecordId,
     /// String-form record identifier as returned by Zenodo.
@@ -461,11 +461,11 @@ pub struct Record {
 #[derive(Deserialize)]
 struct RecordWire {
     #[serde(default)]
-    created: Option<DateTime<Utc>>,
+    created: Option<Timestamp>,
     #[serde(default)]
-    modified: Option<DateTime<Utc>>,
+    modified: Option<Timestamp>,
     #[serde(default)]
-    updated: Option<DateTime<Utc>>,
+    updated: Option<Timestamp>,
     id: RecordId,
     #[serde(deserialize_with = "deserialize_stringish")]
     recid: String,
@@ -726,7 +726,7 @@ mod tests {
     fn record_accepts_both_modified_and_updated_timestamps() {
         let record: Record = serde_json::from_value(json!({
             "created": "2026-04-03T12:00:00+00:00",
-            "modified": "2026-04-03T14:00:00+00:00",
+            "modified": "2026-04-03T14:00:00.297626+00:00",
             "updated": "2026-04-03T13:00:00+00:00",
             "id": 42,
             "recid": 42.0,
@@ -738,8 +738,8 @@ mod tests {
 
         assert!(record.created.is_some());
         assert_eq!(
-            record.modified.unwrap().to_rfc3339(),
-            "2026-04-03T14:00:00+00:00"
+            record.modified.unwrap().to_string(),
+            "2026-04-03T14:00:00.297626Z"
         );
     }
 
