@@ -12,9 +12,9 @@
 //! Unknown Zenodo fields are still preserved through flattened `extra` maps so
 //! the crate remains forward compatible with mild schema drift.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use thiserror::Error;
@@ -239,8 +239,8 @@ pub struct Contributor {
     /// Full contributor name in Zenodo's expected display form.
     pub name: String,
     /// Contributor role label as reported by Zenodo.
-    #[serde(rename = "type")]
-    pub type_: String,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub type_: Option<String>,
     /// Affiliation for the contributor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub affiliation: Option<String>,
@@ -267,7 +267,7 @@ impl Contributor {
     pub fn new(name: impl Into<String>, role: impl Into<String>) -> Self {
         Self {
             name: name.into(),
-            type_: role.into(),
+            type_: Some(role.into()),
             ..Self::default()
         }
     }
@@ -342,7 +342,7 @@ impl ContributorBuilder {
     pub fn build(self) -> Result<Contributor, MetadataEntryBuildError> {
         Ok(Contributor {
             name: required_entry_field(self.name, "Contributor", "name")?,
-            type_: required_entry_field(self.role, "Contributor", "role")?,
+            type_: Some(required_entry_field(self.role, "Contributor", "role")?),
             affiliation: self.affiliation,
             orcid: self.orcid,
             gnd: self.gnd,
@@ -528,8 +528,12 @@ impl RecordIdentifierBuilder {
 /// Date entry attached to a published record.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RecordDate {
-    /// Date value exactly as reported by Zenodo.
-    pub date: String,
+    /// Start of the date interval, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    /// End of the date interval, when present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
     /// Date type label, when present.
     #[serde(rename = "type", default, skip_serializing_if = "Option::is_none")]
     pub type_: Option<String>,
@@ -547,34 +551,31 @@ impl RecordDate {
     pub fn builder() -> RecordDateBuilder {
         RecordDateBuilder::default()
     }
-
-    /// Creates a record date entry with only the required date field.
-    #[must_use]
-    pub fn new(date: impl Into<String>) -> Self {
-        Self {
-            date: date.into(),
-            ..Self::default()
-        }
-    }
 }
 
 /// Builder for [`RecordDate`] values.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct RecordDateBuilder {
-    date: Option<String>,
+    start: Option<String>,
+    end: Option<String>,
     date_type: Option<String>,
     description: Option<String>,
     extra: BTreeMap<String, Value>,
 }
 
 impl RecordDateBuilder {
-    /// Sets the raw date value.
+    /// Sets the interval start.
     #[must_use]
-    pub fn date(mut self, date: impl Into<String>) -> Self {
-        self.date = Some(date.into());
+    pub fn start(mut self, start: impl Into<String>) -> Self {
+        self.start = Some(start.into());
         self
     }
-
+    /// Sets the interval end.
+    #[must_use]
+    pub fn end(mut self, end: impl Into<String>) -> Self {
+        self.end = Some(end.into());
+        self
+    }
     /// Sets the Zenodo date type label.
     #[must_use]
     pub fn date_type(mut self, date_type: impl Into<String>) -> Self {
@@ -607,10 +608,18 @@ impl RecordDateBuilder {
     ///
     /// # Errors
     ///
-    /// Returns an error if the required `date` field is missing.
+    /// Returns an error if both the start and end fields are empty.
     pub fn build(self) -> Result<RecordDate, MetadataEntryBuildError> {
+        if self.start.is_none() && self.end.is_none() {
+            return Err(MetadataEntryBuildError::MissingField {
+                entry: "RecordDate",
+                field: "start or end",
+            });
+        }
+
         Ok(RecordDate {
-            date: required_entry_field(self.date, "RecordDate", "date")?,
+            start: self.start,
+            end: self.end,
             type_: self.date_type,
             description: self.description,
             extra: self.extra,
@@ -856,8 +865,9 @@ impl CommunityRefBuilder {
 /// Reference to a Zenodo grant.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct GrantRef {
-    /// Grant identifier.
-    pub id: String,
+    /// Grant identifier, if provided by Zenodo
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
@@ -878,12 +888,12 @@ impl GrantRef {
     /// use zenodo_rs::GrantRef;
     ///
     /// let grant = GrantRef::new("grant-1");
-    /// assert_eq!(grant.id, "grant-1");
+    /// assert_eq!(grant.id, Some("grant-1".to_string()));
     /// ```
     #[must_use]
     pub fn new(id: impl Into<String>) -> Self {
         Self {
-            id: id.into(),
+            id: Some(id.into()),
             ..Self::default()
         }
     }
@@ -925,7 +935,7 @@ impl GrantRefBuilder {
     /// Returns an error if the required `id` field is missing.
     pub fn build(self) -> Result<GrantRef, MetadataEntryBuildError> {
         Ok(GrantRef {
-            id: required_entry_field(self.id, "GrantRef", "id")?,
+            id: Some(required_entry_field(self.id, "GrantRef", "id")?),
             extra: self.extra,
         })
     }
@@ -1164,6 +1174,165 @@ pub struct DepositMetadataUpdate {
     /// Additional untyped fields preserved for forward compatibility.
     #[serde(flatten, default)]
     pub extra: BTreeMap<String, Value>,
+}
+
+/// Variants of possible date specificity supplied by Zenodo.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DatePrecision {
+    /// Only the year is provided.
+    Year(i32),
+    /// Only the year and month are provided.
+    YearMonth(i32, u32),
+    /// A complete date is provided.
+    Full(NaiveDate),
+}
+
+impl DatePrecision {
+    /// Returns the Publication Date's year
+    #[must_use]
+    pub fn year(&self) -> i32 {
+        match self {
+            Self::Year(year) | Self::YearMonth(year, _) => *year,
+            Self::Full(date) => date.year(),
+        }
+    }
+    /// Returns the Publication Date's month if present.
+    #[must_use]
+    pub fn month(&self) -> Option<u32> {
+        match self {
+            Self::Year(_) => None,
+            Self::YearMonth(_, month) => Some(*month),
+            Self::Full(date) => Some(date.month()),
+        }
+    }
+    /// Returns the Publication Date's day, if present.
+    #[must_use]
+    pub fn day(&self) -> Option<u32> {
+        match self {
+            Self::Full(date) => Some(date.day()),
+            _ => None,
+        }
+    }
+    /// Converts the Publication Date to [`NaiveDate`] if possible.
+    #[must_use]
+    pub fn try_naive(&self) -> Option<NaiveDate> {
+        match self {
+            Self::Full(date) => Some(*date),
+            _ => None,
+        }
+    }
+}
+
+impl FromStr for DatePrecision {
+    type Err = PublicationDateError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let invalid = || PublicationDateError::Invalid(s.to_owned());
+
+        match s.split('-').collect::<Vec<_>>().as_slice() {
+            [year] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                Ok(Self::Year(year))
+            }
+            [year, month] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                let month = month.parse::<u32>().map_err(|_| invalid())?;
+                if !(1..=12).contains(&month) {
+                    return Err(invalid());
+                }
+                Ok(Self::YearMonth(year, month))
+            }
+            [year, month, day] => {
+                let year = year.parse::<i32>().map_err(|_| invalid())?;
+                let month = month.parse::<u32>().map_err(|_| invalid())?;
+                let day = day.parse::<u32>().map_err(|_| invalid())?;
+
+                let date = NaiveDate::from_ymd_opt(year, month, day).ok_or_else(invalid)?;
+
+                Ok(Self::Full(date))
+            }
+
+            _ => Err(invalid()),
+        }
+    }
+}
+
+impl fmt::Display for DatePrecision {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Year(year) => write!(f, "{year:04}"),
+            Self::YearMonth(year, month) => write!(f, "{year:04}-{month:02}"),
+            Self::Full(date) => write!(f, "{}", date.format("%Y-%m-%d")),
+        }
+    }
+}
+
+/// The specified publication date(s) with provided specificity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PublicationDate {
+    /// A single date of publication, minimally year specified.
+    Date(DatePrecision),
+    /// An interval date range, as outline [here](https://inveniordm.docs.cern.ch/reference/metadata/#publication-date-1).
+    Interval {
+        /// The start date of the interval.
+        start: DatePrecision,
+        /// The end date of the interval.
+        end: DatePrecision,
+    },
+}
+
+impl FromStr for PublicationDate {
+    type Err = PublicationDateError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Some((start, end)) = s.split_once('/') {
+            if start.is_empty() || end.is_empty() || end.contains('/') {
+                return Err(PublicationDateError::Invalid(s.to_owned()));
+            }
+            let invalid = |_| PublicationDateError::Invalid(s.to_owned());
+            Ok(Self::Interval {
+                start: start.parse().map_err(invalid)?,
+                end: end.parse().map_err(invalid)?,
+            })
+        } else {
+            Ok(Self::Date(s.parse()?))
+        }
+    }
+}
+
+impl fmt::Display for PublicationDate {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PublicationDate::Date(date_precision) => write!(f, "{date_precision}"),
+            PublicationDate::Interval { start, end } => write!(f, "{start}/{end}"),
+        }
+    }
+}
+
+impl serde::Serialize for PublicationDate {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for PublicationDate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        value.parse().map_err(serde::de::Error::custom)
+    }
+}
+
+/// Errors raised while parsing a [`PublicationDate`].
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PublicationDateError {
+    /// The parsed value is neither an EDTF level 0 date nor an interval of such dates.
+    #[error("invalid publication date: {0}")]
+    Invalid(String),
 }
 
 /// Errors raised while building [`DepositMetadataUpdate`] values.
@@ -1455,7 +1624,7 @@ pub struct RecordMetadata {
     pub title: String,
     /// Publication date, when present.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publication_date: Option<NaiveDate>,
+    pub publication_date: Option<PublicationDate>,
     /// HTML description body, when present.
     #[serde(
         rename = "description",
@@ -1593,6 +1762,8 @@ pub struct RecordMetadata {
 
 #[cfg(test)]
 mod tests {
+    use crate::{metadata::PublicationDate, DatePrecision};
+
     use super::{
         AccessRight, CommunityRef, Contributor, Creator, DepositMetadataBuildError,
         DepositMetadataUpdate, GrantRef, LicenseRef, MetadataEntryBuildError, RecordDate,
@@ -1754,7 +1925,7 @@ mod tests {
             .build()
             .unwrap();
         let date = RecordDate::builder()
-            .date("2026-04-03")
+            .start("2026-04-03")
             .date_type("Collected")
             .description("Sampling day")
             .build()
@@ -1782,13 +1953,15 @@ mod tests {
             .build();
 
         assert_eq!(creator.name, "Doe, Jane");
-        assert_eq!(contributor.type_, "DataManager");
+        assert_eq!(contributor.type_, Some("DataManager".to_string()));
         assert_eq!(subject.term, "chemistry");
         assert_eq!(identifier.scheme.as_deref(), Some("doi"));
         assert_eq!(date.type_.as_deref(), Some("Collected"));
+        assert_eq!(date.start.as_deref(), Some("2026-04-03"));
+        assert_eq!(date.end, None);
         assert_eq!(related.resource_type.as_deref(), Some("dataset"));
         assert_eq!(community.identifier, "zenodo");
-        assert_eq!(grant.id, "grant-1");
+        assert_eq!(grant.id, Some("grant-1".to_string()));
         assert_eq!(license.id.as_deref(), Some("cc-by-4.0"));
         assert_eq!(resource_type.type_.as_deref(), Some("dataset"));
     }
@@ -1822,7 +1995,10 @@ mod tests {
             .extra_field("y", json!(2))
             .build()
             .unwrap();
-        assert_eq!(Contributor::new("Ada", "Supervisor").type_, "Supervisor");
+        assert_eq!(
+            Contributor::new("Ada", "Supervisor").type_,
+            Some("Supervisor".to_string())
+        );
         assert_eq!(contributor.extra.get("x"), Some(&json!(1)));
         assert_eq!(contributor.extra.get("y"), Some(&json!(2)));
 
@@ -1877,16 +2053,25 @@ mod tests {
         let mut date_extra = std::collections::BTreeMap::new();
         date_extra.insert("certainty".into(), json!("exact"));
         let date = RecordDate::builder()
-            .date("2026-04-03")
+            .start("2026-04-03")
+            .end("2026-04-04")
             .date_type("Collected")
             .description("Sampling day")
             .extra(date_extra)
             .extra_field("timezone", json!("UTC"))
             .build()
             .unwrap();
-        assert_eq!(RecordDate::new("2026-04-04").date, "2026-04-04");
+        assert_eq!(date.start.as_deref(), Some("2026-04-03"));
+        assert_eq!(date.end.as_deref(), Some("2026-04-04"));
         assert_eq!(date.extra.get("certainty"), Some(&json!("exact")));
         assert_eq!(date.extra.get("timezone"), Some(&json!("UTC")));
+        assert_eq!(
+            RecordDate::builder().date_type("Collected").build(),
+            Err(MetadataEntryBuildError::MissingField {
+                entry: "RecordDate",
+                field: "start or end",
+            })
+        );
     }
 
     #[test]
@@ -1911,7 +2096,7 @@ mod tests {
             .extra_field("call", json!("Horizon"))
             .build()
             .unwrap();
-        assert_eq!(GrantRef::new("grant-2").id, "grant-2");
+        assert_eq!(GrantRef::new("grant-2").id, Some("grant-2".to_string()));
         assert_eq!(grant.extra.get("agency"), Some(&json!("EU")));
         assert_eq!(grant.extra.get("call"), Some(&json!("Horizon")));
 
@@ -1962,7 +2147,7 @@ mod tests {
 
         assert_eq!(metadata.creators[0].name, "Doe, Jane");
         assert_eq!(metadata.communities[0].identifier, "zenodo");
-        assert_eq!(metadata.grants[0].id, "grant-1");
+        assert_eq!(metadata.grants[0].id, Some("grant-1".to_string()));
     }
 
     #[test]
@@ -2070,7 +2255,7 @@ mod tests {
             metadata.contributors,
             vec![Contributor {
                 name: "Doe, John".into(),
-                type_: "Editor".into(),
+                type_: Some("Editor".into()),
                 affiliation: None,
                 orcid: None,
                 gnd: None,
@@ -2152,5 +2337,154 @@ mod tests {
                 extra: std::collections::BTreeMap::default(),
             })
         );
+    }
+
+    #[test]
+    fn record_metadata_deserializes_optional_fields() {
+        let payload = serde_json::json!({
+            "title": "Test record",
+            "publication_date": "2018-09",
+            "dates": [
+                {
+                    "start": "2026-01-01",
+                    "end": "2026-02-01",
+                    "type": "Collected"
+                },
+                {
+                    "type": "Issued"
+                }
+            ],
+            "contributors": [
+                {
+                    "name": "Doe, Jane"
+                }
+            ],
+            "grants": [
+                {
+                    "code": "ABC123",
+                    "internal_id": "grant-42"
+                }
+            ]
+        });
+
+        let metadata: RecordMetadata = serde_json::from_value(payload).unwrap();
+
+        assert_eq!(
+            metadata.publication_date,
+            Some(PublicationDate::Date(DatePrecision::YearMonth(2018, 9)))
+        );
+
+        assert_eq!(metadata.dates[0].start.as_deref(), Some("2026-01-01"));
+
+        assert_eq!(metadata.dates[0].end.as_deref(), Some("2026-02-01"));
+
+        assert_eq!(metadata.dates[1].start, None);
+        assert_eq!(metadata.dates[1].end, None);
+
+        assert_eq!(metadata.contributors[0].type_, None);
+
+        assert_eq!(metadata.grants[0].id, None);
+
+        assert_eq!(
+            metadata.grants[0].extra.get("code"),
+            Some(&serde_json::json!("ABC123"))
+        );
+    }
+
+    #[test]
+    fn publication_date_preserves_partial_precision() {
+        let date: DatePrecision = "2018-09".parse().unwrap();
+
+        assert_eq!(date, DatePrecision::YearMonth(2018, 9));
+        assert_eq!(date.year(), 2018);
+        assert_eq!(date.month(), Some(9));
+        assert_eq!(date.day(), None);
+        assert_eq!(date.try_naive(), None);
+    }
+
+    #[test]
+    fn publication_date_parses_date_precisions() {
+        assert_eq!(
+            "2026".parse::<DatePrecision>().unwrap(),
+            DatePrecision::Year(2026)
+        );
+
+        assert_eq!(
+            "2026-11".parse::<DatePrecision>().unwrap(),
+            DatePrecision::YearMonth(2026, 11)
+        );
+
+        assert_eq!(
+            "2026-11-06".parse::<DatePrecision>().unwrap(),
+            DatePrecision::Full(NaiveDate::from_ymd_opt(2026, 11, 6).unwrap())
+        );
+    }
+
+    #[test]
+    fn publication_date_parses_intervals() {
+        assert_eq!(
+            "1981/2024".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Year(1981),
+                end: DatePrecision::Year(2024),
+            }
+        );
+
+        assert_eq!(
+            "2024-06-19/2024-06-30".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Full(NaiveDate::from_ymd_opt(2024, 6, 19).unwrap()),
+                end: DatePrecision::Full(NaiveDate::from_ymd_opt(2024, 6, 30).unwrap()),
+            }
+        );
+
+        assert_eq!(
+            "1939-09-01/1945-09".parse::<PublicationDate>().unwrap(),
+            PublicationDate::Interval {
+                start: DatePrecision::Full(NaiveDate::from_ymd_opt(1939, 9, 1).unwrap()),
+                end: DatePrecision::YearMonth(1945, 9),
+            }
+        );
+    }
+
+    #[test]
+    fn publication_date_roundtrips() {
+        for input in [
+            "2026",
+            "2018-09",
+            "2026-11-06",
+            "1981/2024",
+            "2024-06-19/2024-06-30",
+            "1939-09-01/1945-09",
+        ] {
+            let date: PublicationDate = input.parse().unwrap();
+
+            assert_eq!(date.to_string(), input);
+
+            let json = serde_json::to_string(&date).unwrap();
+            let decoded: PublicationDate = serde_json::from_str(&json).unwrap();
+
+            assert_eq!(decoded, date);
+        }
+    }
+
+    #[test]
+    fn publication_date_rejects_invalid_values() {
+        for input in [
+            "",
+            "hello",
+            "2026-13",
+            "2026-02-30",
+            "2020/",
+            "/2020",
+            "2020/2021/2022",
+            "2020-13/2021",
+            "2020/2021-02-30",
+        ] {
+            assert_eq!(
+                input.parse::<PublicationDate>(),
+                Err(super::PublicationDateError::Invalid(input.to_owned())),
+            );
+        }
     }
 }

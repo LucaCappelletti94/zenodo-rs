@@ -67,9 +67,10 @@ pub use error::{FieldError, ZenodoError};
 pub use ids::{BucketUrl, ConceptRecId, DepositionFileId, DepositionId, Doi, DoiError, RecordId};
 pub use metadata::{
     AccessRight, CommunityRef, CommunityRefBuilder, Contributor, ContributorBuilder, Creator,
-    CreatorBuilder, DepositMetadataBuildError, DepositMetadataUpdate, DepositMetadataUpdateBuilder,
-    GrantRef, GrantRefBuilder, LicenseRef, LicenseRefBuilder, MetadataEntryBuildError, RecordDate,
-    RecordDateBuilder, RecordIdentifier, RecordIdentifierBuilder, RecordMetadata, RecordRelations,
+    CreatorBuilder, DatePrecision, DepositMetadataBuildError, DepositMetadataUpdate,
+    DepositMetadataUpdateBuilder, GrantRef, GrantRefBuilder, LicenseRef, LicenseRefBuilder,
+    MetadataEntryBuildError, PublicationDate, PublicationDateError, RecordDate, RecordDateBuilder,
+    RecordIdentifier, RecordIdentifierBuilder, RecordMetadata, RecordRelations,
     RecordVersionRelation, RelatedIdentifier, RelatedIdentifierBuilder, ResourceType,
     ResourceTypeBuilder, Subject, SubjectBuilder, UploadType,
 };

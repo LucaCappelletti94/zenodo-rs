@@ -44,7 +44,6 @@ hex = { version = "0.4.3", optional = true }
 indicatif = { version = "0.18.4", optional = true }
 md-5 = { version = "0.11.0", optional = true }
 mime = "0.3.17"
-mime_guess = "2.0.5"
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "query", "stream"] }
 rustls = { version = "0.23", default-features = false, optional = true }
 secrecy = "0.10.3"
@@ -56,6 +55,7 @@ tokio = { version = "1.52.2", features = ["fs", "io-util", "macros", "rt-multi-t
 tokio-stream = "0.1.18"
 tokio-util = { version = "0.7.18", features = ["io"] }
 url = { version = "2.5.8", features = ["serde"] }
+serde_path_to_error = "0.1.20"
 
 [dev-dependencies]
 axum = "0.8.9"
