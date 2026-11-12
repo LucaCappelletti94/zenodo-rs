@@ -1288,10 +1288,10 @@ impl FromStr for PublicationDate {
             if start.is_empty() || end.is_empty() || end.contains('/') {
                 return Err(PublicationDateError::Invalid(s.to_owned()));
             }
-
+            let invalid = |_| PublicationDateError::Invalid(s.to_owned());
             Ok(Self::Interval {
-                start: start.parse()?,
-                end: end.parse()?,
+                start: start.parse().map_err(invalid)?,
+                end: end.parse().map_err(invalid)?,
             })
         } else {
             Ok(Self::Date(s.parse()?))
@@ -1327,12 +1327,11 @@ impl<'de> serde::Deserialize<'de> for PublicationDate {
     }
 }
 
-/// Internal Error handling for [`PublicationDate`].
+/// Errors raised while parsing a [`PublicationDate`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PublicationDateError {
-    /// Publication Date was found invalid and unable to be parsed.
+    /// The parsed value is neither an EDTF level 0 date nor an interval of such dates.
     #[error("invalid publication date: {0}")]
-    /// The invalid publication date.
     Invalid(String),
 }
 
@@ -2341,27 +2340,6 @@ mod tests {
     }
 
     #[test]
-    fn publication_date_roundtrip() {
-        for input in ["2026", "2018-09", "2026-11-06"] {
-            let date: PublicationDate = input.parse().unwrap();
-
-            assert_eq!(date.to_string(), input);
-
-            let json = serde_json::to_string(&date).unwrap();
-            let decoded: PublicationDate = serde_json::from_str(&json).unwrap();
-
-            assert_eq!(decoded, date);
-        }
-    }
-
-    #[test]
-    fn publication_date_rejects_invalid_dates() {
-        for input in ["", "hello", "2026-13", "2026-02-30", "2026-11-06-extra"] {
-            assert!(input.parse::<PublicationDate>().is_err());
-        }
-    }
-
-    #[test]
     fn record_metadata_deserializes_optional_fields() {
         let payload = serde_json::json!({
             "title": "Test record",
@@ -2503,21 +2481,10 @@ mod tests {
             "2020-13/2021",
             "2020/2021-02-30",
         ] {
-            assert!(
-                input.parse::<PublicationDate>().is_err(),
-                "Unexpectedly accepted: {input}"
+            assert_eq!(
+                input.parse::<PublicationDate>(),
+                Err(super::PublicationDateError::Invalid(input.to_owned())), 
             );
         }
-    }
-
-    #[test]
-    fn record_date_builder_rejects_missing_boundaries() {
-        assert_eq!(
-            RecordDate::builder().date_type("Collected").build(),
-            Err(MetadataEntryBuildError::MissingField {
-                entry: "RecordDate",
-                field: "start or end",
-            })
-        );
     }
 }

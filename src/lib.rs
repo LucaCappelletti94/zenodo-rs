@@ -72,7 +72,7 @@ pub use metadata::{
     MetadataEntryBuildError, PublicationDate, RecordDate, RecordDateBuilder, RecordIdentifier,
     RecordIdentifierBuilder, RecordMetadata, RecordRelations, RecordVersionRelation,
     RelatedIdentifier, RelatedIdentifierBuilder, ResourceType, ResourceTypeBuilder, Subject,
-    SubjectBuilder, UploadType,
+    SubjectBuilder, UploadType, PublicationDateError
 };
 pub use model::{
     ArtifactInfo, BucketObject, DepositState, Deposition, DepositionFile, DepositionLinks,
