@@ -1350,7 +1350,7 @@ impl<'de> serde::Deserialize<'de> for PublicationDate {
         D: Deserializer<'de>,
     {
         let value = String::deserialize(deserializer)?;
-        value.parse().map_err(serde::de::Error::custom)
+        value.trim().parse().map_err(serde::de::Error::custom)
     }
 }
 
@@ -2435,6 +2435,18 @@ mod tests {
             let decoded: PublicationDate = serde_json::from_str(&json).unwrap();
 
             assert_eq!(decoded, date);
+        }
+    }
+
+    #[test]
+    fn publication_date_deserializes_padded_values() {
+        for (json, expected) in [
+            ("\" 2013-01-21\"", "2013-01-21"),
+            ("\"2018-09 \"", "2018-09"),
+            ("\"\\t1981/2024\\n\"", "1981/2024"),
+        ] {
+            let decoded: PublicationDate = serde_json::from_str(json).unwrap();
+            assert_eq!(decoded.to_string(), expected);
         }
     }
 

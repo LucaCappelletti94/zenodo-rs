@@ -22,7 +22,7 @@ It covers deposition create/update/publish flows, safe draft reuse versus `newve
 
 ```toml
 [dependencies]
-zenodo-rs = "0.1"
+zenodo-rs = "0.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
