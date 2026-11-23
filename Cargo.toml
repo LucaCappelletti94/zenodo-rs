@@ -55,7 +55,7 @@ thiserror = "2.0.18"
 tokio = { version = "1.52.2", features = ["fs", "io-util", "macros", "rt-multi-thread", "sync", "time"] }
 tokio-stream = "0.1.18"
 tokio-util = { version = "0.7.18", features = ["io"] }
-url = { version = "2.5.8", features = ["serde"] }
+url = { version = "2.5.9", features = ["serde"] }
 
 [dev-dependencies]
 axum = "0.8.9"

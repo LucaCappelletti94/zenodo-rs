@@ -1043,6 +1043,41 @@ async fn cross_origin_downloads_do_not_forward_auth_or_json_accept() {
 }
 
 #[tokio::test]
+async fn nested_blob_download_link_is_rejected_without_aborting() {
+    let server = MockZenodoServer::start().await;
+    let client = server.client();
+    let nested_blob_link = format!("{}https://example.com/", "blob:".repeat(10_000));
+
+    server.enqueue_json(
+        Method::GET,
+        "/api/records/502",
+        StatusCode::OK,
+        json!({
+            "id": 502,
+            "recid": 502,
+            "metadata": { "title": "Nested blob" },
+            "files": [{
+                "id": "f-502",
+                "key": "artifact.bin",
+                "size": 3,
+                "links": { "self": nested_blob_link }
+            }],
+            "links": {}
+        }),
+    );
+
+    let result = client
+        .open_artifact(&ArtifactSelector::FileByKey {
+            record: RecordSelector::RecordId(RecordId(502)),
+            key: "artifact.bin".into(),
+            latest: false,
+        })
+        .await;
+
+    assert!(matches!(result, Err(ZenodoError::Transport(_))));
+}
+
+#[tokio::test]
 async fn doi_resolution_requires_exact_match_and_can_follow_next_page() {
     let server = MockZenodoServer::start().await;
     let client = server.client();
