@@ -43,13 +43,6 @@ pub enum ZenodoError {
         #[from]
         reqwest::Error,
     ),
-    /// JSON serialization or deserialization failed.
-    #[error(transparent)]
-    Json(
-        /// Underlying JSON error.
-        #[from]
-        serde_json::Error,
-    ),
     /// A local I/O operation failed.
     #[error(transparent)]
     Io(
@@ -64,6 +57,17 @@ pub enum ZenodoError {
         #[from]
         url::ParseError,
     ),
+    /// Zenodo response could not be decoded for a given path.
+    #[error("failed to decode Zenodo response from {url} at {path:} {source}")]
+    ResponseDecode {
+        /// Url where the path resides.
+        url: String,
+        /// The specific path that failed to decode.
+        path: String,
+        /// The associated `serde_json` error.
+        #[source]
+        source: serde_json::Error,
+    },
     /// A required environment variable could not be read.
     #[error("failed to read environment variable {name}: {source}")]
     EnvVar {
